@@ -47,6 +47,7 @@
 pub mod crypto;
 pub mod dlq;
 pub mod error;
+pub mod metrics;
 pub mod provider;
 pub mod schema;
 pub mod state;
@@ -57,6 +58,7 @@ pub mod types;
 pub use crypto::{Aes256GcmEncryptor, EncryptedPayload, EventEncryptor};
 pub use dlq::{DeadLetterEvent, DlqHandler, MemoryDlqHandler};
 pub use error::{EventError, Result};
+pub use metrics::{EventMetrics, MetricsSnapshot};
 pub use provider::{EventProvider, PendingEvent, ProviderInfo, Subscription};
 pub use schema::{Compatibility, EventSchema, MemorySchemaRegistry, SchemaRegistry};
 pub use state::{FileStateStore, MemoryStateStore, StateStore};

@@ -69,6 +69,7 @@ async fn main() -> a3s_event::Result<()> {
 - **NATS JetStream Provider**: Distributed, persistent event streaming with configurable retention
 - **Payload Encryption**: AES-256-GCM encrypt/decrypt with key rotation — protect sensitive payloads at the application layer
 - **State Persistence**: Subscription filters survive restarts via pluggable `StateStore` (JSON file or custom)
+- **Observability**: Lock-free `EventMetrics` counters for publish/subscribe/error/latency — scrape with `metrics()` or serialize to JSON
 
 ## Providers
 
@@ -172,6 +173,8 @@ Wildcard patterns:
 | `EncryptedPayload` | Encrypted envelope (key_id, nonce, ciphertext) |
 | `StateStore` | Trait for persisting subscription state |
 | `FileStateStore` | JSON file-based state persistence |
+| `EventMetrics` | Lock-free atomic counters for publish, subscribe, error, latency |
+| `MetricsSnapshot` | Serializable point-in-time view of all metrics |
 
 ## API Reference
 
@@ -374,6 +377,7 @@ just doc                # Generate and open docs
 | `provider::memory` | In-memory provider: publish, subscribe, history, wildcards |
 | `provider::nats` | NATS provider: client, config, subscriber (requires NATS) |
 | `store` | EventBus high-level operations |
+| `metrics` | Lock-free counters, latency tracking, concurrent access |
 | `nats_integration` | End-to-end NATS tests: publish, dedup, durable sub, manual ack |
 
 ### Running Tests
@@ -470,7 +474,7 @@ Confidence and onboarding.
 - [x] Deployment guide and configuration reference (`docs/deployment.md`)
 - [x] Provider implementation guide (`docs/custom-providers.md`)
 
-**Test summary: 106 unit tests + 9 integration tests across 9 modules**
+**Test summary: 122 unit tests + 9 integration tests across 10 modules**
 
 ### Phase 5: Payload Encryption ✅
 
@@ -496,14 +500,18 @@ Subscription filter durability across restarts.
 - [x] Auto-save on `update_subscription()` and `remove_subscription()`
 - [x] 7 state store tests + 5 EventBus persistence integration tests
 
-### Phase 7: Observability Integration 🚧
+### Phase 7: Observability Integration ✅
 
 Bridge provider metrics into application-level tracing/metrics.
 
-- [ ] `EventMetrics` struct — publish count, error count, latency histogram, DLQ depth
-- [ ] `EventBus` emits metrics on publish/subscribe/error
-- [ ] `metrics()` accessor for scraping
-- [ ] Integration with `tracing` and `metrics` crates
+- [x] `EventMetrics` struct — lock-free atomic counters for publish, subscribe, error, DLQ, encrypt/decrypt, latency (cumulative + max)
+- [x] `MetricsSnapshot` — serializable point-in-time view of all counters (`#[derive(Serialize)]` with camelCase)
+- [x] `EventBus` emits metrics on publish (timing + errors), subscribe/unsubscribe, validation errors, encrypt/decrypt counts, DLQ
+- [x] `EventBus::metrics()` accessor for scraping
+- [x] Lock-free CAS loop for max latency tracking
+- [x] `reset()` to zero all counters
+- [x] Integration with `tracing` spans on publish and subscribe lifecycle
+- [x] 10 metrics unit tests + 6 EventBus metrics integration tests
 
 ## License
 

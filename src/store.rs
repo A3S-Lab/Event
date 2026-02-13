@@ -5,6 +5,7 @@
 
 use crate::crypto::EventEncryptor;
 use crate::error::{EventError, Result};
+use crate::metrics::EventMetrics;
 use crate::provider::{EventProvider, ProviderInfo, Subscription};
 use crate::schema::SchemaRegistry;
 use crate::state::StateStore;
@@ -12,6 +13,7 @@ use crate::types::{Event, EventCounts, PublishOptions, SubscriptionFilter};
 use crate::dlq::DlqHandler;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::RwLock;
 
 /// High-level event bus backed by a pluggable provider
@@ -40,6 +42,9 @@ pub struct EventBus {
 
     /// Optional state store for subscription persistence
     state_store: Option<Arc<dyn StateStore>>,
+
+    /// Observability metrics
+    metrics: Arc<EventMetrics>,
 }
 
 impl EventBus {
@@ -52,6 +57,7 @@ impl EventBus {
             dlq_handler: None,
             encryptor: None,
             state_store: None,
+            metrics: Arc::new(EventMetrics::new()),
         }
     }
 
@@ -67,6 +73,7 @@ impl EventBus {
             dlq_handler: None,
             encryptor: None,
             state_store: None,
+            metrics: Arc::new(EventMetrics::new()),
         }
     }
 
@@ -102,6 +109,13 @@ impl EventBus {
         self.state_store.as_deref()
     }
 
+    /// Get the metrics handle
+    ///
+    /// Use `metrics().snapshot()` for a point-in-time view of all counters.
+    pub fn metrics(&self) -> &EventMetrics {
+        &self.metrics
+    }
+
     /// Get the encryptor (if configured)
     pub fn encryptor(&self) -> Option<&dyn EventEncryptor> {
         self.encryptor.as_deref()
@@ -133,8 +147,16 @@ impl EventBus {
     ) -> Result<Event> {
         let subject = self.provider.build_subject(category, topic);
         let mut event = Event::new(subject, category, summary, source, payload);
-        self.validate_if_configured(&event)?;
-        self.encrypt_if_configured(&mut event)?;
+
+        if let Err(e) = self.validate_if_configured(&event) {
+            self.metrics.record_validation_error();
+            return Err(e);
+        }
+
+        if self.encryptor.is_some() {
+            self.encrypt_if_configured(&mut event)?;
+            self.metrics.record_encrypt();
+        }
 
         let span = tracing::info_span!(
             "event.publish",
@@ -146,14 +168,30 @@ impl EventBus {
         let _guard = span.enter();
         drop(_guard);
 
-        self.provider.publish(&event).await?;
-        Ok(event)
+        let start = Instant::now();
+        match self.provider.publish(&event).await {
+            Ok(_) => {
+                self.metrics.record_publish(start);
+                Ok(event)
+            }
+            Err(e) => {
+                self.metrics.record_publish_error();
+                Err(e)
+            }
+        }
     }
 
     /// Publish a pre-built event
     pub async fn publish_event(&self, event: &Event) -> Result<u64> {
-        self.validate_if_configured(event)?;
+        if let Err(e) = self.validate_if_configured(event) {
+            self.metrics.record_validation_error();
+            return Err(e);
+        }
+
         let event = self.maybe_encrypt_clone(event)?;
+        if self.encryptor.is_some() {
+            self.metrics.record_encrypt();
+        }
 
         let span = tracing::info_span!(
             "event.publish",
@@ -165,7 +203,17 @@ impl EventBus {
         let _guard = span.enter();
         drop(_guard);
 
-        self.provider.publish(&event).await
+        let start = Instant::now();
+        match self.provider.publish(&event).await {
+            Ok(seq) => {
+                self.metrics.record_publish(start);
+                Ok(seq)
+            }
+            Err(e) => {
+                self.metrics.record_publish_error();
+                Err(e)
+            }
+        }
     }
 
     /// Publish a pre-built event with provider-specific options
@@ -174,8 +222,15 @@ impl EventBus {
         event: &Event,
         opts: &PublishOptions,
     ) -> Result<u64> {
-        self.validate_if_configured(event)?;
+        if let Err(e) = self.validate_if_configured(event) {
+            self.metrics.record_validation_error();
+            return Err(e);
+        }
+
         let event = self.maybe_encrypt_clone(event)?;
+        if self.encryptor.is_some() {
+            self.metrics.record_encrypt();
+        }
 
         let span = tracing::info_span!(
             "event.publish",
@@ -188,7 +243,17 @@ impl EventBus {
         let _guard = span.enter();
         drop(_guard);
 
-        self.provider.publish_with_options(&event, opts).await
+        let start = Instant::now();
+        match self.provider.publish_with_options(&event, opts).await {
+            Ok(seq) => {
+                self.metrics.record_publish(start);
+                Ok(seq)
+            }
+            Err(e) => {
+                self.metrics.record_publish_error();
+                Err(e)
+            }
+        }
     }
 
     /// Fetch recent events, optionally filtered by category
@@ -203,7 +268,12 @@ impl EventBus {
         let mut events = self.provider
             .history(filter.as_deref(), limit)
             .await?;
-        self.decrypt_events(&mut events);
+        let decrypted = self.decrypt_events(&mut events);
+        if decrypted > 0 {
+            for _ in 0..decrypted {
+                self.metrics.record_decrypt();
+            }
+        }
         Ok(events)
     }
 
@@ -231,6 +301,8 @@ impl EventBus {
             subs.insert(subscriber_id.clone(), filter.clone());
             self.persist_state(&subs);
         }
+
+        self.metrics.record_subscribe();
 
         tracing::info!(
             subscriber = %subscriber_id,
@@ -303,6 +375,7 @@ impl EventBus {
         };
 
         if let Some(filter) = filter {
+            self.metrics.record_unsubscribe();
             for subject in &filter.subjects {
                 let consumer_name = format!("{}-{}", subscriber_id, subject.replace('.', "-"));
                 if let Err(e) = self.provider.unsubscribe(&consumer_name).await {
@@ -374,16 +447,20 @@ impl EventBus {
     }
 
     /// Decrypt event payloads in-place (best-effort, skips failures)
-    fn decrypt_events(&self, events: &mut [Event]) {
+    /// Returns the number of payloads decrypted.
+    fn decrypt_events(&self, events: &mut [Event]) -> usize {
+        let mut count = 0;
         if let Some(ref encryptor) = self.encryptor {
             for event in events.iter_mut() {
                 if crate::crypto::EncryptedPayload::is_encrypted(&event.payload) {
                     if let Ok(decrypted) = encryptor.decrypt(&event.payload) {
                         event.payload = decrypted;
+                        count += 1;
                     }
                 }
             }
         }
+        count
     }
 
     /// Persist subscription state (best-effort, logs on failure)
@@ -854,5 +931,93 @@ mod tests {
         }
 
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_metrics_publish_count() {
+        let bus = test_bus();
+        bus.publish("test", "a", "A", "test", serde_json::json!({})).await.unwrap();
+        bus.publish("test", "b", "B", "test", serde_json::json!({})).await.unwrap();
+
+        let s = bus.metrics().snapshot();
+        assert_eq!(s.publish_count, 2);
+        assert_eq!(s.publish_errors, 0);
+        assert!(s.avg_publish_latency_us < 1_000_000); // sanity check
+    }
+
+    #[tokio::test]
+    async fn test_metrics_subscribe_unsubscribe() {
+        let bus = test_bus();
+        let filter = SubscriptionFilter {
+            subscriber_id: "m".to_string(),
+            subjects: vec!["events.>".to_string()],
+            durable: false,
+            options: None,
+        };
+        bus.update_subscription(filter).await.unwrap();
+        bus.remove_subscription("m").await.unwrap();
+
+        let s = bus.metrics().snapshot();
+        assert_eq!(s.subscribe_count, 1);
+        assert_eq!(s.unsubscribe_count, 1);
+    }
+
+    #[tokio::test]
+    async fn test_metrics_validation_error() {
+        let registry = Arc::new(MemorySchemaRegistry::new());
+        registry
+            .register(EventSchema {
+                event_type: "strict.type".to_string(),
+                version: 1,
+                required_fields: vec!["required_field".to_string()],
+                description: String::new(),
+            })
+            .unwrap();
+
+        let bus = EventBus::with_schema_registry(MemoryProvider::default(), registry);
+
+        let bad_event = Event::typed(
+            "events.test.a", "test", "strict.type", 1,
+            "Bad", "test", serde_json::json!({}),
+        );
+        assert!(bus.publish_event(&bad_event).await.is_err());
+
+        let s = bus.metrics().snapshot();
+        assert_eq!(s.validation_errors, 1);
+        assert_eq!(s.publish_count, 0);
+    }
+
+    #[tokio::test]
+    async fn test_metrics_encrypt_decrypt() {
+        let enc = Arc::new(crate::crypto::Aes256GcmEncryptor::new("k1", &[0x42; 32]));
+        let mut bus = test_bus();
+        bus.set_encryptor(enc);
+
+        bus.publish("test", "a", "A", "test", serde_json::json!({"data": 1})).await.unwrap();
+        bus.list_events(None, 10).await.unwrap();
+
+        let s = bus.metrics().snapshot();
+        assert_eq!(s.encrypt_count, 1);
+        assert_eq!(s.decrypt_count, 1);
+    }
+
+    #[tokio::test]
+    async fn test_metrics_snapshot_serializable() {
+        let bus = test_bus();
+        bus.publish("test", "a", "A", "test", serde_json::json!({})).await.unwrap();
+
+        let s = bus.metrics().snapshot();
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(json.contains("publishCount"));
+    }
+
+    #[tokio::test]
+    async fn test_metrics_reset() {
+        let bus = test_bus();
+        bus.publish("test", "a", "A", "test", serde_json::json!({})).await.unwrap();
+        assert_eq!(bus.metrics().snapshot().publish_count, 1);
+
+        bus.metrics().reset();
+        assert_eq!(bus.metrics().snapshot().publish_count, 0);
     }
 }
