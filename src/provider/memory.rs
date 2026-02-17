@@ -5,6 +5,7 @@
 
 use crate::error::Result;
 use crate::provider::{EventProvider, PendingEvent, ProviderInfo, Subscription};
+use crate::subject::subject_matches;
 use crate::types::{Event, ReceivedEvent};
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -212,42 +213,9 @@ impl Subscription for MemorySubscription {
     }
 }
 
-/// Check if a subject matches a filter pattern
-///
-/// Supports `>` (match rest) and `*` (match one token) wildcards.
-fn subject_matches(subject: &str, filter: &str) -> bool {
-    let sub_parts: Vec<&str> = subject.split('.').collect();
-    let filter_parts: Vec<&str> = filter.split('.').collect();
-
-    for (i, fp) in filter_parts.iter().enumerate() {
-        if *fp == ">" {
-            return true; // Match everything after
-        }
-        if i >= sub_parts.len() {
-            return false;
-        }
-        if *fp != "*" && *fp != sub_parts[i] {
-            return false;
-        }
-    }
-
-    sub_parts.len() == filter_parts.len()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_subject_matches() {
-        assert!(subject_matches("events.market.forex", "events.market.forex"));
-        assert!(subject_matches("events.market.forex", "events.market.>"));
-        assert!(subject_matches("events.market.forex.usd", "events.market.>"));
-        assert!(subject_matches("events.market.forex", "events.*.forex"));
-        assert!(!subject_matches("events.market.forex", "events.system.>"));
-        assert!(!subject_matches("events.market", "events.market.forex"));
-        assert!(subject_matches("events.market.forex", "events.>"));
-    }
 
     #[test]
     fn test_memory_config_default() {

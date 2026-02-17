@@ -5,9 +5,10 @@
 //! schema validation, DLQ, state persistence, metrics, and concurrency.
 
 use a3s_event::{
-    Aes256GcmEncryptor, DeadLetterEvent, DlqHandler, Event, EventBus, MemoryDlqHandler,
-    MemorySchemaRegistry, MemoryStateStore, EventSchema, SchemaRegistry, StateStore,
-    SubscriptionFilter,
+    Aes256GcmEncryptor, Broker, CloudEvent, CollectorSink, DeadLetterEvent, DlqHandler, Event,
+    EventBus, EventSink, MemoryDlqHandler, MemorySchemaRegistry, MemoryStateStore, EventSchema,
+    SchemaRegistry, ScaleUpPayload, ScalingEvent, SinkDlqHandler, StateStore,
+    SubscriptionFilter, Trigger, TriggerFilter, TopicSink,
 };
 use std::sync::Arc;
 
@@ -818,4 +819,227 @@ async fn test_full_stack_all_features() {
     let info = bus.info().await.unwrap();
     assert_eq!(info.provider, "memory");
     assert_eq!(info.messages, 2);
+}
+
+// ─── Phase 8: Knative Eventing ───────────────────────────────────
+
+#[tokio::test]
+async fn test_cloudevents_roundtrip_via_bus() {
+    let bus = test_bus();
+
+    // Publish a typed event
+    let event = Event::typed(
+        "events.gateway.scale.up",
+        "gateway",
+        "a3s.gateway.scale.up",
+        1,
+        "Scale up web-api",
+        "gateway",
+        serde_json::json!({"service": "web-api", "desired_replicas": 5}),
+    )
+    .with_metadata("priority", "high");
+
+    bus.publish_event(&event).await.unwrap();
+
+    // Convert to CloudEvent and back
+    let ce: CloudEvent = event.clone().into();
+    assert_eq!(ce.specversion, "1.0");
+    assert_eq!(ce.event_type, "a3s.gateway.scale.up");
+    assert_eq!(ce.source, "gateway");
+
+    let recovered: Event = ce.try_into().unwrap();
+    assert_eq!(recovered.id, event.id);
+    assert_eq!(recovered.event_type, "a3s.gateway.scale.up");
+    assert_eq!(recovered.metadata["priority"], "high");
+    assert_eq!(recovered.payload["service"], "web-api");
+}
+
+#[tokio::test]
+async fn test_broker_trigger_routing_via_bus() {
+    let _bus = Arc::new(test_bus());
+    let broker = Arc::new(Broker::new());
+
+    // Create collector sinks
+    let scale_sink = Arc::new(CollectorSink::new("scale-events"));
+    let health_sink = Arc::new(CollectorSink::new("health-events"));
+
+    // Register triggers
+    broker
+        .add_trigger(Trigger::new(
+            "scale-trigger",
+            TriggerFilter::by_type("a3s.gateway.scale.up"),
+            scale_sink.clone(),
+        ))
+        .await;
+
+    broker
+        .add_trigger(Trigger::new(
+            "health-trigger",
+            TriggerFilter::by_type("a3s.box.instance.health"),
+            health_sink.clone(),
+        ))
+        .await;
+
+    // Route a scale-up event
+    let scale_event = ScaleUpPayload {
+        service: "web-api".to_string(),
+        desired_replicas: 5,
+        reason: "High RPS".to_string(),
+    }
+    .to_event("Scale up web-api");
+
+    let result = broker.route(&scale_event).await;
+    assert_eq!(result.matched, 1);
+    assert_eq!(result.delivered, 1);
+
+    // Route a health event
+    let health_event = Event::typed(
+        "events.box.instance.health",
+        "box",
+        "a3s.box.instance.health",
+        1,
+        "Health report",
+        "box",
+        serde_json::json!({"instance_id": "i-1", "cpu_percent": 45.0}),
+    );
+
+    let result = broker.route(&health_event).await;
+    assert_eq!(result.matched, 1);
+
+    // Route an unrelated event — no matches
+    let other = Event::new("events.test.a", "test", "Unrelated", "src", serde_json::json!({}));
+    let result = broker.route(&other).await;
+    assert_eq!(result.matched, 0);
+
+    // Verify collected events
+    assert_eq!(scale_sink.count().await, 1);
+    assert_eq!(health_sink.count().await, 1);
+    let scale_events = scale_sink.events().await;
+    assert_eq!(scale_events[0].payload["service"], "web-api");
+}
+
+#[tokio::test]
+async fn test_bus_with_broker_auto_routing() {
+    let collector = Arc::new(CollectorSink::new("auto-route"));
+    let broker = Arc::new(Broker::new());
+
+    broker
+        .add_trigger(Trigger::new(
+            "all-events",
+            TriggerFilter::default(),
+            collector.clone(),
+        ))
+        .await;
+
+    let mut bus = test_bus();
+    bus.set_broker(broker.clone());
+
+    // Publish through bus — should auto-route through broker
+    bus.publish("market", "forex", "Rate", "reuters", serde_json::json!({"rate": 7.35}))
+        .await
+        .unwrap();
+
+    bus.publish("system", "deploy", "Deploy", "ci", serde_json::json!({"version": "1.2"}))
+        .await
+        .unwrap();
+
+    // Broker should have collected both events
+    assert_eq!(collector.count().await, 2);
+    assert!(bus.broker().is_some());
+}
+
+#[tokio::test]
+async fn test_scaling_events_end_to_end() {
+    let bus = test_bus();
+
+    // Create and publish scaling events using typed payloads
+    let scale_up = ScaleUpPayload {
+        service: "web-api".to_string(),
+        desired_replicas: 5,
+        reason: "RPS > 1000".to_string(),
+    };
+    let event = scale_up.to_event("Scale up web-api to 5");
+    bus.publish_event(&event).await.unwrap();
+
+    let ready = a3s_event::InstanceReadyPayload {
+        service: "web-api".to_string(),
+        instance_id: "inst-abc".to_string(),
+        endpoint: "10.0.0.5:8080".to_string(),
+    };
+    let event = ready.to_event("Instance inst-abc ready");
+    bus.publish_event(&event).await.unwrap();
+
+    // Verify events are stored
+    let events = bus.list_events(None, 10).await.unwrap();
+    assert_eq!(events.len(), 2);
+    assert!(events.iter().any(|e| e.event_type == "a3s.gateway.scale.up"));
+    assert!(events.iter().any(|e| e.event_type == "a3s.box.instance.ready"));
+}
+
+#[tokio::test]
+async fn test_sink_dlq_integration() {
+    let collector = Arc::new(CollectorSink::new("dlq-sink"));
+    let dlq = Arc::new(SinkDlqHandler::new(collector.clone(), 100));
+
+    let mut bus = test_bus();
+    bus.set_dlq_handler(dlq.clone());
+
+    // Simulate a dead-lettered event
+    let received = a3s_event::ReceivedEvent {
+        event: Event::new(
+            "events.payment.process",
+            "payment",
+            "Payment processing",
+            "billing",
+            serde_json::json!({"order_id": "ORD-456", "amount": 99.99}),
+        ),
+        sequence: 42,
+        num_delivered: 5,
+        stream: "memory".to_string(),
+    };
+
+    let dle = DeadLetterEvent::new(received, "Timeout after 5 retries")
+        .with_original_subject("events.payment.process")
+        .with_delivery_attempts(5)
+        .with_first_failure_at(1700000000000);
+
+    dlq.handle(dle).await.unwrap();
+
+    // Verify DLQ count
+    assert_eq!(dlq.count().await.unwrap(), 1);
+
+    // Verify event was forwarded to sink
+    let events = collector.events().await;
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].event_type, "a3s.dlq.dead_letter");
+    assert_eq!(events[0].metadata["dlq_reason"], "Timeout after 5 retries");
+    assert_eq!(events[0].metadata["dlq_original_subject"], "events.payment.process");
+    assert_eq!(events[0].metadata["dlq_delivery_attempts"], "5");
+    assert_eq!(events[0].metadata["dlq_first_failure_at"], "1700000000000");
+}
+
+#[tokio::test]
+async fn test_topic_sink_and_provider_sharing() {
+    let bus = test_bus();
+
+    // Get shared provider reference
+    let provider_arc = bus.provider_arc();
+
+    // Create a topic sink sharing the same provider
+    let sink = TopicSink::new("forwarding-sink", provider_arc);
+
+    // Deliver through sink
+    let event = Event::new(
+        "events.forwarded.event",
+        "forwarded",
+        "Forwarded event",
+        "sink",
+        serde_json::json!({"forwarded": true}),
+    );
+    sink.deliver(&event).await.unwrap();
+
+    // Verify event appears in bus history
+    let events = bus.list_events(None, 10).await.unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].payload["forwarded"], true);
 }

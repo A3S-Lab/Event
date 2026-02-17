@@ -66,6 +66,25 @@ pub enum EventError {
         version: u32,
         reason: String,
     },
+
+    /// Sink delivery failure
+    #[error("Sink delivery failed for '{sink}': {reason}")]
+    SinkDelivery {
+        sink: String,
+        reason: String,
+    },
+
+    /// Broker routing failure
+    #[error("Broker routing error: {0}")]
+    BrokerRouting(String),
+
+    /// CloudEvent conversion failure
+    #[error("CloudEvent conversion error: {0}")]
+    CloudEventConversion(String),
+
+    /// Event source error
+    #[error("Event source error: {0}")]
+    Source(String),
 }
 
 /// Result type alias for event operations
@@ -130,5 +149,34 @@ mod tests {
         let json_err = serde_json::from_str::<String>("invalid").unwrap_err();
         let err: EventError = json_err.into();
         assert!(matches!(err, EventError::Serialization(_)));
+    }
+
+    #[test]
+    fn test_sink_delivery_error() {
+        let err = EventError::SinkDelivery {
+            sink: "http-sink".to_string(),
+            reason: "connection refused".to_string(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("http-sink"));
+        assert!(msg.contains("connection refused"));
+    }
+
+    #[test]
+    fn test_broker_routing_error() {
+        let err = EventError::BrokerRouting("no matching triggers".to_string());
+        assert!(err.to_string().contains("no matching triggers"));
+    }
+
+    #[test]
+    fn test_cloudevent_conversion_error() {
+        let err = EventError::CloudEventConversion("missing required field".to_string());
+        assert!(err.to_string().contains("missing required field"));
+    }
+
+    #[test]
+    fn test_source_error() {
+        let err = EventError::Source("interval too small".to_string());
+        assert!(err.to_string().contains("interval too small"));
     }
 }

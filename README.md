@@ -70,6 +70,12 @@ async fn main() -> a3s_event::Result<()> {
 - **Payload Encryption**: AES-256-GCM encrypt/decrypt with key rotation — protect sensitive payloads at the application layer
 - **State Persistence**: Subscription filters survive restarts via pluggable `StateStore` (JSON file or custom)
 - **Observability**: Lock-free `EventMetrics` counters for publish/subscribe/error/latency — scrape with `metrics()` or serialize to JSON
+- **CloudEvents v1.0**: Standard envelope with lossless `Event` ↔ `CloudEvent` conversion — A3S-specific fields stored as extensions
+- **Broker/Trigger Routing**: Knative-inspired event routing — publishers emit to a Broker, Triggers filter by type/source/subject/attributes and deliver to sinks in parallel
+- **Event Sinks**: Pluggable delivery targets — `TopicSink` (publish to provider), `InProcessSink` (call handler), `LogSink` (debug logging), `CollectorSink` (testing)
+- **Event Sources**: `CronSource` emits events on a schedule; `WebhookSource` and `MetricsSource` trait definitions for custom implementations
+- **Scaling Events**: Typed payloads for Gateway ↔ Box coordination — `ScaleUpPayload`, `ScaleDownPayload`, `InstanceReadyPayload`, `InstanceStoppedPayload`, `InstanceHealthPayload`
+- **Sink-based DLQ**: `SinkDlqHandler` forwards dead-lettered events through any `EventSink` with full DLQ metadata (original subject, delivery attempts, first failure timestamp)
 
 ## Providers
 
@@ -175,6 +181,17 @@ Wildcard patterns:
 | `FileStateStore` | JSON file-based state persistence |
 | `EventMetrics` | Lock-free atomic counters for publish, subscribe, error, latency |
 | `MetricsSnapshot` | Serializable point-in-time view of all metrics |
+| `CloudEvent` | CloudEvents v1.0 envelope with lossless A3S conversion |
+| `Broker` | Event router — evaluates triggers and delivers to matching sinks |
+| `Trigger` | Pairs a `TriggerFilter` with an `EventSink` for routing |
+| `TriggerFilter` | Match by event type, source, subject pattern, metadata attributes |
+| `EventSink` | Trait for event delivery targets (topic, handler, log, etc.) |
+| `TopicSink` | Sink that publishes to an EventProvider topic |
+| `InProcessSink` | Sink that calls an async handler closure |
+| `EventSource` | Trait for event generators (cron, webhook, metrics) |
+| `CronSource` | Emits events on a fixed interval with graceful shutdown |
+| `ScalingEvent` | Trait for typed scaling payloads with `to_event()` conversion |
+| `SinkDlqHandler` | DLQ handler that forwards dead letters through an EventSink |
 
 ## API Reference
 
@@ -378,7 +395,13 @@ just doc                # Generate and open docs
 | `provider::nats` | NATS provider: client, config, subscriber (requires NATS) |
 | `store` | EventBus high-level operations |
 | `metrics` | Lock-free counters, latency tracking, concurrent access |
-| `memory_integration` | End-to-end memory provider: publish, subscribe, encryption, schema, DLQ, state, metrics, concurrency |
+| `cloudevents` | CloudEvent creation, serialization, Event ↔ CloudEvent conversion |
+| `sink` | EventSink trait: TopicSink, InProcessSink, LogSink, CollectorSink, FailingSink |
+| `broker` | TriggerFilter matching, Broker routing, parallel delivery, error handling |
+| `source` | CronSource interval emission, graceful shutdown |
+| `scaling` | Scaling payload serialization, ScalingEvent trait, into_event conversion |
+| `subject` | Subject wildcard matching (shared utility) |
+| `memory_integration` | End-to-end memory provider: publish, subscribe, encryption, schema, DLQ, state, metrics, concurrency, broker/trigger, CloudEvents, scaling, sink DLQ |
 | `nats_integration` | End-to-end NATS tests: publish, dedup, durable sub, manual ack |
 
 ### Running Tests
@@ -475,7 +498,7 @@ Confidence and onboarding.
 - [x] Deployment guide and configuration reference (`docs/deployment.md`)
 - [x] Provider implementation guide (`docs/custom-providers.md`)
 
-**Test summary: 122 unit tests + 24 memory integration tests + 9 NATS integration tests across 10 modules**
+**Test summary: 190 unit tests + 30 memory integration tests + 9 NATS integration tests across 16 modules**
 
 ### Phase 5: Payload Encryption ✅
 
@@ -513,6 +536,22 @@ Bridge provider metrics into application-level tracing/metrics.
 - [x] `reset()` to zero all counters
 - [x] Integration with `tracing` spans on publish and subscribe lifecycle
 - [x] 10 metrics unit tests + 6 EventBus metrics integration tests
+
+### Phase 8: Knative Eventing — Event Nervous System ✅
+
+A3S Event acts as the "nervous system" connecting Gateway (traffic brain) and Box (instance executor). It standardizes event-driven communication across the ecosystem using CloudEvents. In standalone mode, events are the primary coordination channel between Gateway and Box. In K8s mode, events complement K8s-native mechanisms (Endpoints watch, HPA) with richer application-level signals.
+
+- [x] **CloudEvents envelope**: `CloudEvent` struct with CloudEvents v1.0 required + optional attributes, lossless `From<Event>` and `TryFrom<CloudEvent>` conversion with A3S-specific fields stored as `a3s`-prefixed extensions
+- [x] **Scaling events (standalone mode)**: Typed payloads with `ScalingEvent` trait for Gateway ↔ Box autoscaler coordination:
+  - `a3s.gateway.scale.up` — `ScaleUpPayload` (service, desired_replicas, reason)
+  - `a3s.gateway.scale.down` — `ScaleDownPayload` (service, target_replicas, drain_timeout_secs)
+  - `a3s.box.instance.ready` — `InstanceReadyPayload` (service, instance_id, endpoint)
+  - `a3s.box.instance.stopped` — `InstanceStoppedPayload` (service, instance_id)
+  - `a3s.box.instance.health` — `InstanceHealthPayload` (instance_id, cpu_percent, memory_bytes, in_flight)
+- [x] **Broker/Trigger pattern**: `Broker` receives events and evaluates `Trigger` filters (by type, source, subject pattern, metadata attributes). Matching events delivered to `EventSink` targets in parallel. Fire-and-forget — delivery errors logged but don't block publishers.
+- [x] **Event source adapters**: `EventSource` trait + `CronSource` (tokio interval + Notify-based shutdown). `WebhookSource` and `MetricsSource` trait-only definitions for application-level implementations.
+- [x] **Event sink interface**: `EventSink` trait with implementations — `TopicSink` (publish to provider), `InProcessSink` (async handler closure), `LogSink` (tracing), `CollectorSink` (testing), `FailingSink` (error path testing)
+- [x] **Dead letter routing**: `SinkDlqHandler` wraps an `EventSink`, forwards dead-lettered events with DLQ metadata (original_subject, delivery_attempts, first_failure_at). `DeadLetterEvent` extended with optional fields (backward-compatible). `EventBus` stores `Arc<dyn EventProvider>` enabling `TopicSink` provider sharing.
 
 ## License
 

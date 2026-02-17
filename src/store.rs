@@ -3,6 +3,7 @@
 //! `EventBus` provides a convenient API for event publishing, querying,
 //! and subscription management on top of any `EventProvider` implementation.
 
+use crate::broker::Broker;
 use crate::crypto::EventEncryptor;
 use crate::error::{EventError, Result};
 use crate::metrics::EventMetrics;
@@ -26,7 +27,7 @@ use tokio::sync::RwLock;
 /// Optionally persists subscription state via a `StateStore`.
 /// Optionally routes failed events to a `DlqHandler`.
 pub struct EventBus {
-    provider: Box<dyn EventProvider>,
+    provider: Arc<dyn EventProvider>,
 
     /// Tracked subscriptions (subscriber_id → filter)
     subscriptions: Arc<RwLock<HashMap<String, SubscriptionFilter>>>,
@@ -43,6 +44,9 @@ pub struct EventBus {
     /// Optional state store for subscription persistence
     state_store: Option<Arc<dyn StateStore>>,
 
+    /// Optional event broker for trigger-based routing
+    broker: Option<Arc<Broker>>,
+
     /// Observability metrics
     metrics: Arc<EventMetrics>,
 }
@@ -51,12 +55,13 @@ impl EventBus {
     /// Create a new event bus from a provider
     pub fn new(provider: impl EventProvider + 'static) -> Self {
         Self {
-            provider: Box::new(provider),
+            provider: Arc::new(provider),
             subscriptions: Arc::new(RwLock::new(HashMap::new())),
             schema_registry: None,
             dlq_handler: None,
             encryptor: None,
             state_store: None,
+            broker: None,
             metrics: Arc::new(EventMetrics::new()),
         }
     }
@@ -67,12 +72,13 @@ impl EventBus {
         registry: Arc<dyn SchemaRegistry>,
     ) -> Self {
         Self {
-            provider: Box::new(provider),
+            provider: Arc::new(provider),
             subscriptions: Arc::new(RwLock::new(HashMap::new())),
             schema_registry: Some(registry),
             dlq_handler: None,
             encryptor: None,
             state_store: None,
+            broker: None,
             metrics: Arc::new(EventMetrics::new()),
         }
     }
@@ -136,6 +142,26 @@ impl EventBus {
         self.provider.name()
     }
 
+    /// Set the event broker for trigger-based routing
+    ///
+    /// When a broker is configured, all published events are automatically
+    /// routed through the broker after being published to the provider.
+    pub fn set_broker(&mut self, broker: Arc<Broker>) {
+        self.broker = Some(broker);
+    }
+
+    /// Get the broker (if configured)
+    pub fn broker(&self) -> Option<&Broker> {
+        self.broker.as_deref()
+    }
+
+    /// Get a shared reference to the underlying provider
+    ///
+    /// Useful for creating `TopicSink` instances that share the provider.
+    pub fn provider_arc(&self) -> Arc<dyn EventProvider> {
+        self.provider.clone()
+    }
+
     /// Publish an event with convenience parameters
     pub async fn publish(
         &self,
@@ -172,6 +198,7 @@ impl EventBus {
         match self.provider.publish(&event).await {
             Ok(_) => {
                 self.metrics.record_publish(start);
+                self.maybe_route_through_broker(&event).await;
                 Ok(event)
             }
             Err(e) => {
@@ -207,6 +234,7 @@ impl EventBus {
         match self.provider.publish(&event).await {
             Ok(seq) => {
                 self.metrics.record_publish(start);
+                self.maybe_route_through_broker(&event).await;
                 Ok(seq)
             }
             Err(e) => {
@@ -247,6 +275,7 @@ impl EventBus {
         match self.provider.publish_with_options(&event, opts).await {
             Ok(seq) => {
                 self.metrics.record_publish(start);
+                self.maybe_route_through_broker(&event).await;
                 Ok(seq)
             }
             Err(e) => {
@@ -461,6 +490,22 @@ impl EventBus {
             }
         }
         count
+    }
+
+    /// Route event through broker if configured (fire-and-forget)
+    async fn maybe_route_through_broker(&self, event: &Event) {
+        if let Some(ref broker) = self.broker {
+            let result = broker.route(event).await;
+            if result.failed > 0 {
+                tracing::warn!(
+                    event_id = %event.id,
+                    matched = result.matched,
+                    delivered = result.delivered,
+                    failed = result.failed,
+                    "Broker routing had failures"
+                );
+            }
+        }
     }
 
     /// Persist subscription state (best-effort, logs on failure)
