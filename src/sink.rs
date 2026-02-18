@@ -6,7 +6,7 @@
 
 use crate::error::{EventError, Result};
 use crate::provider::EventProvider;
-use crate::types::Event;
+use crate::types::{BoxFuture, Event};
 use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -58,7 +58,7 @@ impl EventSink for TopicSink {
 
 /// Type alias for the async handler function used by InProcessSink
 type HandlerFn =
-    dyn Fn(Event) -> futures::future::BoxFuture<'static, Result<()>> + Send + Sync;
+    dyn Fn(Event) -> BoxFuture<'static, Result<()>> + Send + Sync;
 
 /// Sink that calls an in-process async handler
 ///
@@ -75,7 +75,7 @@ impl InProcessSink {
         F: Fn(Event) -> Fut + Send + Sync + 'static,
         Fut: std::future::Future<Output = Result<()>> + Send + 'static,
     {
-        let handler = Arc::new(move |event: Event| -> futures::future::BoxFuture<'static, Result<()>> {
+        let handler = Arc::new(move |event: Event| -> BoxFuture<'static, Result<()>> {
             Box::pin(handler(event))
         }) as Arc<HandlerFn>;
 

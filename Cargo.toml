@@ -1,6 +1,6 @@
 [package]
 name = "a3s-event"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 authors = ["A3S Lab"]
 license = "MIT"
@@ -17,7 +17,7 @@ path = "src/lib.rs"
 
 [features]
 default = ["nats", "encryption", "cloudevents", "routing"]
-nats = ["dep:async-nats", "dep:time"]
+nats = ["dep:async-nats", "dep:time", "dep:futures-util"]
 encryption = ["dep:aes-gcm", "dep:base64"]
 cloudevents = ["dep:chrono"]
 routing = []
@@ -28,14 +28,13 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "1"
 tokio = { version = "1", features = ["sync", "time", "rt", "macros"] }
-tokio-stream = "0.1"
 async-trait = "0.1"
 uuid = { version = "1.6", features = ["v4"] }
 tracing = "0.1"
-futures = "0.3"
 
 # Optional: NATS JetStream provider
 async-nats = { version = "0.38", optional = true }
+futures-util = { version = "0.3", optional = true }
 time = { version = "0.3", optional = true }
 
 # Optional: AES-256-GCM payload encryption
@@ -53,3 +52,9 @@ criterion = { version = "0.5", features = ["async_tokio"] }
 [[bench]]
 name = "publish"
 harness = false
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true

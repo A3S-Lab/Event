@@ -5,6 +5,7 @@
 
 use crate::error::Result;
 use crate::types::{Event, PublishOptions, ReceivedEvent, SubscribeOptions};
+use crate::types::BoxFuture;
 use async_trait::async_trait;
 
 pub mod memory;
@@ -132,18 +133,18 @@ pub struct PendingEvent {
     pub received: ReceivedEvent,
 
     /// Ack callback — call to confirm processing
-    ack_fn: Box<dyn FnOnce() -> futures::future::BoxFuture<'static, Result<()>> + Send>,
+    ack_fn: Box<dyn FnOnce() -> BoxFuture<'static, Result<()>> + Send>,
 
     /// Nak callback — call to request redelivery
-    nak_fn: Box<dyn FnOnce() -> futures::future::BoxFuture<'static, Result<()>> + Send>,
+    nak_fn: Box<dyn FnOnce() -> BoxFuture<'static, Result<()>> + Send>,
 }
 
 impl PendingEvent {
     /// Create a new pending event with ack/nak callbacks
     pub fn new(
         received: ReceivedEvent,
-        ack_fn: impl FnOnce() -> futures::future::BoxFuture<'static, Result<()>> + Send + 'static,
-        nak_fn: impl FnOnce() -> futures::future::BoxFuture<'static, Result<()>> + Send + 'static,
+        ack_fn: impl FnOnce() -> BoxFuture<'static, Result<()>> + Send + 'static,
+        nak_fn: impl FnOnce() -> BoxFuture<'static, Result<()>> + Send + 'static,
     ) -> Self {
         Self {
             received,

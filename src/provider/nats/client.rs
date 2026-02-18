@@ -319,7 +319,7 @@ impl NatsClient {
             .await
             .map_err(|e| EventError::JetStream(format!("Failed to fetch history: {}", e)))?;
 
-        use futures::StreamExt;
+        use futures_util::StreamExt;
         let mut batch = std::pin::pin!(batch);
         while let Some(msg) = batch.next().await {
             match msg {

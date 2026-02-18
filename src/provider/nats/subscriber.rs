@@ -27,7 +27,7 @@ impl NatsSubscription {
 #[async_trait]
 impl Subscription for NatsSubscription {
     async fn next(&mut self) -> Result<Option<ReceivedEvent>> {
-        use futures::StreamExt;
+        use futures_util::StreamExt;
 
         match self.messages.next().await {
             Some(Ok(msg)) => {
@@ -62,7 +62,7 @@ impl Subscription for NatsSubscription {
     }
 
     async fn next_manual_ack(&mut self) -> Result<Option<PendingEvent>> {
-        use futures::StreamExt;
+        use futures_util::StreamExt;
 
         match self.messages.next().await {
             Some(Ok(msg)) => {

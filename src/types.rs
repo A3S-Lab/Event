@@ -4,6 +4,11 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
+
+/// A pinned, boxed, Send future — replaces `futures::future::BoxFuture`
+pub(crate) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// A single event in the system
 ///
