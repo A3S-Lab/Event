@@ -3,7 +3,9 @@
 //! `EventBus` provides a convenient API for event publishing, querying,
 //! and subscription management on top of any `EventProvider` implementation.
 
+#[cfg(feature = "routing")]
 use crate::broker::Broker;
+#[cfg(feature = "encryption")]
 use crate::crypto::EventEncryptor;
 use crate::error::{EventError, Result};
 use crate::metrics::EventMetrics;
@@ -39,12 +41,14 @@ pub struct EventBus {
     dlq_handler: Option<Arc<dyn DlqHandler>>,
 
     /// Optional payload encryptor
+    #[cfg(feature = "encryption")]
     encryptor: Option<Arc<dyn EventEncryptor>>,
 
     /// Optional state store for subscription persistence
     state_store: Option<Arc<dyn StateStore>>,
 
     /// Optional event broker for trigger-based routing
+    #[cfg(feature = "routing")]
     broker: Option<Arc<Broker>>,
 
     /// Observability metrics
@@ -59,8 +63,10 @@ impl EventBus {
             subscriptions: Arc::new(RwLock::new(HashMap::new())),
             schema_registry: None,
             dlq_handler: None,
+            #[cfg(feature = "encryption")]
             encryptor: None,
             state_store: None,
+            #[cfg(feature = "routing")]
             broker: None,
             metrics: Arc::new(EventMetrics::new()),
         }
@@ -76,8 +82,10 @@ impl EventBus {
             subscriptions: Arc::new(RwLock::new(HashMap::new())),
             schema_registry: Some(registry),
             dlq_handler: None,
+            #[cfg(feature = "encryption")]
             encryptor: None,
             state_store: None,
+            #[cfg(feature = "routing")]
             broker: None,
             metrics: Arc::new(EventMetrics::new()),
         }
@@ -89,6 +97,7 @@ impl EventBus {
     }
 
     /// Set the payload encryptor
+    #[cfg(feature = "encryption")]
     pub fn set_encryptor(&mut self, encryptor: Arc<dyn EventEncryptor>) {
         self.encryptor = Some(encryptor);
     }
@@ -123,6 +132,7 @@ impl EventBus {
     }
 
     /// Get the encryptor (if configured)
+    #[cfg(feature = "encryption")]
     pub fn encryptor(&self) -> Option<&dyn EventEncryptor> {
         self.encryptor.as_deref()
     }
@@ -146,11 +156,13 @@ impl EventBus {
     ///
     /// When a broker is configured, all published events are automatically
     /// routed through the broker after being published to the provider.
+    #[cfg(feature = "routing")]
     pub fn set_broker(&mut self, broker: Arc<Broker>) {
         self.broker = Some(broker);
     }
 
     /// Get the broker (if configured)
+    #[cfg(feature = "routing")]
     pub fn broker(&self) -> Option<&Broker> {
         self.broker.as_deref()
     }
@@ -172,13 +184,17 @@ impl EventBus {
         payload: serde_json::Value,
     ) -> Result<Event> {
         let subject = self.provider.build_subject(category, topic);
+        #[cfg(feature = "encryption")]
         let mut event = Event::new(subject, category, summary, source, payload);
+        #[cfg(not(feature = "encryption"))]
+        let event = Event::new(subject, category, summary, source, payload);
 
         if let Err(e) = self.validate_if_configured(&event) {
             self.metrics.record_validation_error();
             return Err(e);
         }
 
+        #[cfg(feature = "encryption")]
         if self.encryptor.is_some() {
             self.encrypt_if_configured(&mut event)?;
             self.metrics.record_encrypt();
@@ -198,6 +214,7 @@ impl EventBus {
         match self.provider.publish(&event).await {
             Ok(_) => {
                 self.metrics.record_publish(start);
+                #[cfg(feature = "routing")]
                 self.maybe_route_through_broker(&event).await;
                 Ok(event)
             }
@@ -215,10 +232,16 @@ impl EventBus {
             return Err(e);
         }
 
-        let event = self.maybe_encrypt_clone(event)?;
-        if self.encryptor.is_some() {
-            self.metrics.record_encrypt();
-        }
+        #[cfg(feature = "encryption")]
+        let event = {
+            let e = self.maybe_encrypt_clone(event)?;
+            if self.encryptor.is_some() {
+                self.metrics.record_encrypt();
+            }
+            e
+        };
+        #[cfg(not(feature = "encryption"))]
+        let event = event.clone();
 
         let span = tracing::info_span!(
             "event.publish",
@@ -234,6 +257,7 @@ impl EventBus {
         match self.provider.publish(&event).await {
             Ok(seq) => {
                 self.metrics.record_publish(start);
+                #[cfg(feature = "routing")]
                 self.maybe_route_through_broker(&event).await;
                 Ok(seq)
             }
@@ -255,10 +279,16 @@ impl EventBus {
             return Err(e);
         }
 
-        let event = self.maybe_encrypt_clone(event)?;
-        if self.encryptor.is_some() {
-            self.metrics.record_encrypt();
-        }
+        #[cfg(feature = "encryption")]
+        let event = {
+            let e = self.maybe_encrypt_clone(event)?;
+            if self.encryptor.is_some() {
+                self.metrics.record_encrypt();
+            }
+            e
+        };
+        #[cfg(not(feature = "encryption"))]
+        let event = event.clone();
 
         let span = tracing::info_span!(
             "event.publish",
@@ -275,6 +305,7 @@ impl EventBus {
         match self.provider.publish_with_options(&event, opts).await {
             Ok(seq) => {
                 self.metrics.record_publish(start);
+                #[cfg(feature = "routing")]
                 self.maybe_route_through_broker(&event).await;
                 Ok(seq)
             }
@@ -294,13 +325,21 @@ impl EventBus {
         limit: usize,
     ) -> Result<Vec<Event>> {
         let filter = category.map(|c| self.provider.category_subject(c));
+        #[cfg(feature = "encryption")]
         let mut events = self.provider
             .history(filter.as_deref(), limit)
             .await?;
-        let decrypted = self.decrypt_events(&mut events);
-        if decrypted > 0 {
-            for _ in 0..decrypted {
-                self.metrics.record_decrypt();
+        #[cfg(not(feature = "encryption"))]
+        let events = self.provider
+            .history(filter.as_deref(), limit)
+            .await?;
+        #[cfg(feature = "encryption")]
+        {
+            let decrypted = self.decrypt_events(&mut events);
+            if decrypted > 0 {
+                for _ in 0..decrypted {
+                    self.metrics.record_decrypt();
+                }
             }
         }
         Ok(events)
@@ -456,6 +495,7 @@ impl EventBus {
     }
 
     /// Encrypt event payload in-place (if encryptor configured)
+    #[cfg(feature = "encryption")]
     fn encrypt_if_configured(&self, event: &mut Event) -> Result<()> {
         if let Some(ref encryptor) = self.encryptor {
             event.payload = encryptor.encrypt(&event.payload)?;
@@ -464,6 +504,7 @@ impl EventBus {
     }
 
     /// Clone event and encrypt payload if encryptor is configured
+    #[cfg(feature = "encryption")]
     fn maybe_encrypt_clone(&self, event: &Event) -> Result<Event> {
         match self.encryptor {
             Some(ref encryptor) => {
@@ -477,6 +518,7 @@ impl EventBus {
 
     /// Decrypt event payloads in-place (best-effort, skips failures)
     /// Returns the number of payloads decrypted.
+    #[cfg(feature = "encryption")]
     fn decrypt_events(&self, events: &mut [Event]) -> usize {
         let mut count = 0;
         if let Some(ref encryptor) = self.encryptor {
@@ -493,6 +535,7 @@ impl EventBus {
     }
 
     /// Route event through broker if configured (fire-and-forget)
+    #[cfg(feature = "routing")]
     async fn maybe_route_through_broker(&self, event: &Event) {
         if let Some(ref broker) = self.broker {
             let result = broker.route(event).await;
@@ -799,6 +842,7 @@ mod tests {
         assert_eq!(bus.list_subscriptions().await.len(), 1);
     }
 
+    #[cfg(feature = "encryption")]
     #[tokio::test]
     async fn test_encrypted_publish_and_list() {
         let enc = Arc::new(crate::crypto::Aes256GcmEncryptor::new("k1", &[0x42; 32]));
@@ -819,6 +863,7 @@ mod tests {
         assert_eq!(events[0].payload, serde_json::json!({"rate": 7.35}));
     }
 
+    #[cfg(feature = "encryption")]
     #[tokio::test]
     async fn test_encrypted_publish_event_prebuilt() {
         let enc = Arc::new(crate::crypto::Aes256GcmEncryptor::new("k1", &[0x42; 32]));
@@ -837,6 +882,7 @@ mod tests {
         assert_eq!(events[0].payload, serde_json::json!({"secret": "data"}));
     }
 
+    #[cfg(feature = "encryption")]
     #[tokio::test]
     async fn test_no_encryptor_passthrough() {
         let bus = test_bus();
@@ -850,6 +896,7 @@ mod tests {
         assert_eq!(event.payload, serde_json::json!({"plain": true}));
     }
 
+    #[cfg(feature = "encryption")]
     #[tokio::test]
     async fn test_encryptor_accessor() {
         let enc = Arc::new(crate::crypto::Aes256GcmEncryptor::new("k1", &[0x42; 32]));
@@ -1032,6 +1079,7 @@ mod tests {
         assert_eq!(s.publish_count, 0);
     }
 
+    #[cfg(feature = "encryption")]
     #[tokio::test]
     async fn test_metrics_encrypt_decrypt() {
         let enc = Arc::new(crate::crypto::Aes256GcmEncryptor::new("k1", &[0x42; 32]));

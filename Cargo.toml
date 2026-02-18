@@ -15,22 +15,35 @@ categories = ["asynchronous", "network-programming"]
 name = "a3s_event"
 path = "src/lib.rs"
 
+[features]
+default = ["nats", "encryption", "cloudevents", "routing"]
+nats = ["dep:async-nats", "dep:time"]
+encryption = ["dep:aes-gcm", "dep:base64"]
+cloudevents = ["dep:chrono"]
+routing = []
+full = ["nats", "encryption", "cloudevents", "routing"]
+
 [dependencies]
-async-nats = "0.38"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "1"
-tokio = { version = "1", features = ["sync", "time"] }
+tokio = { version = "1", features = ["sync", "time", "rt", "macros"] }
 tokio-stream = "0.1"
 async-trait = "0.1"
 uuid = { version = "1.6", features = ["v4"] }
-chrono = { version = "0.4", features = ["serde"] }
 tracing = "0.1"
-time = "0.3"
 futures = "0.3"
-bytes = "1.5"
-aes-gcm = "0.10"
-base64 = "0.22"
+
+# Optional: NATS JetStream provider
+async-nats = { version = "0.38", optional = true }
+time = { version = "0.3", optional = true }
+
+# Optional: AES-256-GCM payload encryption
+aes-gcm = { version = "0.10", optional = true }
+base64 = { version = "0.22", optional = true }
+
+# Optional: CloudEvents v1.0 conversion
+chrono = { version = "0.4", features = ["serde"], optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }

@@ -1,3 +1,4 @@
+#![cfg(feature = "nats")]
 //! NATS JetStream integration tests
 //!
 //! These tests require a running NATS server with JetStream enabled:

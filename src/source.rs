@@ -108,36 +108,6 @@ impl EventSource for CronSource {
     }
 }
 
-/// Marker trait for webhook-based event sources
-///
-/// Concrete implementations require an HTTP server, which is out of scope
-/// for a library crate. This trait defines the contract for webhook sources
-/// that can be implemented by applications.
-#[async_trait]
-pub trait WebhookSource: EventSource {
-    /// The path this webhook listens on (e.g., "/webhooks/github")
-    fn path(&self) -> &str;
-
-    /// Accepted content types (e.g., "application/json")
-    fn content_types(&self) -> Vec<String> {
-        vec!["application/json".to_string()]
-    }
-}
-
-/// Marker trait for metrics-based event sources
-///
-/// Concrete implementations require a metrics collector (Prometheus, etc.),
-/// which is out of scope for a library crate. This trait defines the contract
-/// for metric threshold sources.
-#[async_trait]
-pub trait MetricsSource: EventSource {
-    /// The metric name being monitored
-    fn metric_name(&self) -> &str;
-
-    /// The threshold value that triggers an event
-    fn threshold(&self) -> f64;
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

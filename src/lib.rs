@@ -44,16 +44,20 @@
 //! - **Subscription** trait — async event stream from any provider
 //! - **Event** — provider-agnostic message envelope
 
+#[cfg(feature = "routing")]
 pub mod broker;
+#[cfg(feature = "cloudevents")]
 pub mod cloudevents;
+#[cfg(feature = "encryption")]
 pub mod crypto;
 pub mod dlq;
 pub mod error;
 pub mod metrics;
 pub mod provider;
-pub mod scaling;
 pub mod schema;
+#[cfg(feature = "routing")]
 pub mod sink;
+#[cfg(feature = "routing")]
 pub mod source;
 pub mod state;
 pub mod store;
@@ -61,19 +65,22 @@ pub mod subject;
 pub mod types;
 
 // Re-export core types
+#[cfg(feature = "routing")]
 pub use broker::{Broker, RouteResult, Trigger, TriggerFilter};
+#[cfg(feature = "cloudevents")]
 pub use cloudevents::CloudEvent;
+#[cfg(feature = "encryption")]
 pub use crypto::{Aes256GcmEncryptor, EncryptedPayload, EventEncryptor};
-pub use dlq::{DeadLetterEvent, DlqHandler, MemoryDlqHandler, SinkDlqHandler};
+pub use dlq::{DeadLetterEvent, DlqHandler, MemoryDlqHandler};
+#[cfg(feature = "routing")]
+pub use dlq::SinkDlqHandler;
 pub use error::{EventError, Result};
 pub use metrics::{EventMetrics, MetricsSnapshot};
 pub use provider::{EventProvider, PendingEvent, ProviderInfo, Subscription};
-pub use scaling::{
-    InstanceHealthPayload, InstanceReadyPayload, InstanceStoppedPayload, ScaleDownPayload,
-    ScaleUpPayload, ScalingEvent,
-};
 pub use schema::{Compatibility, EventSchema, MemorySchemaRegistry, SchemaRegistry};
+#[cfg(feature = "routing")]
 pub use sink::{CollectorSink, EventSink, FailingSink, InProcessSink, LogSink, TopicSink};
+#[cfg(feature = "routing")]
 pub use source::{CronSource, EventSource};
 pub use state::{FileStateStore, MemoryStateStore, StateStore};
 pub use store::EventBus;
@@ -84,4 +91,5 @@ pub use types::{
 
 // Re-export providers for convenience
 pub use provider::memory::{MemoryConfig, MemoryProvider};
+#[cfg(feature = "nats")]
 pub use provider::nats::{NatsClient, NatsConfig, NatsProvider, NatsSubscription, StorageType};

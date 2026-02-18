@@ -75,19 +75,6 @@ impl NatsConfig {
     pub fn stream_subjects(&self) -> Vec<String> {
         vec![format!("{}.>", self.subject_prefix)]
     }
-
-    /// Build a full subject from category and topic
-    ///
-    /// Example: prefix="events", category="market", topic="forex.usd_cny"
-    /// → "events.market.forex.usd_cny"
-    pub fn build_subject(&self, category: &str, topic: &str) -> String {
-        format!("{}.{}.{}", self.subject_prefix, category, topic)
-    }
-
-    /// Build a wildcard subject for a category (e.g., "events.market.>")
-    pub fn category_subject(&self, category: &str) -> String {
-        format!("{}.{}.>", self.subject_prefix, category)
-    }
 }
 
 #[cfg(test)]
@@ -110,25 +97,6 @@ mod tests {
     fn test_stream_subjects() {
         let config = NatsConfig::default();
         assert_eq!(config.stream_subjects(), vec!["events.>"]);
-    }
-
-    #[test]
-    fn test_build_subject() {
-        let config = NatsConfig::default();
-        assert_eq!(
-            config.build_subject("market", "forex.usd_cny"),
-            "events.market.forex.usd_cny"
-        );
-        assert_eq!(
-            config.build_subject("system", "deploy"),
-            "events.system.deploy"
-        );
-    }
-
-    #[test]
-    fn test_category_subject() {
-        let config = NatsConfig::default();
-        assert_eq!(config.category_subject("market"), "events.market.>");
     }
 
     #[test]

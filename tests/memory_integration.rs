@@ -1,3 +1,4 @@
+#![cfg(all(feature = "encryption", feature = "cloudevents", feature = "routing"))]
 //! Memory provider integration tests
 //!
 //! End-to-end tests exercising the full EventBus lifecycle with the
@@ -7,7 +8,7 @@
 use a3s_event::{
     Aes256GcmEncryptor, Broker, CloudEvent, CollectorSink, DeadLetterEvent, DlqHandler, Event,
     EventBus, EventSink, MemoryDlqHandler, MemorySchemaRegistry, MemoryStateStore, EventSchema,
-    SchemaRegistry, ScaleUpPayload, ScalingEvent, SinkDlqHandler, StateStore,
+    SchemaRegistry, SinkDlqHandler, StateStore,
     SubscriptionFilter, Trigger, TriggerFilter, TopicSink,
 };
 use std::sync::Arc;
@@ -881,12 +882,15 @@ async fn test_broker_trigger_routing_via_bus() {
         .await;
 
     // Route a scale-up event
-    let scale_event = ScaleUpPayload {
-        service: "web-api".to_string(),
-        desired_replicas: 5,
-        reason: "High RPS".to_string(),
-    }
-    .to_event("Scale up web-api");
+    let scale_event = Event::typed(
+        "events.gateway.scale.up",
+        "gateway",
+        "a3s.gateway.scale.up",
+        1,
+        "Scale up web-api",
+        "gateway",
+        serde_json::json!({"service": "web-api", "desired_replicas": 5, "reason": "High RPS"}),
+    );
 
     let result = broker.route(&scale_event).await;
     assert_eq!(result.matched, 1);
@@ -946,34 +950,6 @@ async fn test_bus_with_broker_auto_routing() {
     // Broker should have collected both events
     assert_eq!(collector.count().await, 2);
     assert!(bus.broker().is_some());
-}
-
-#[tokio::test]
-async fn test_scaling_events_end_to_end() {
-    let bus = test_bus();
-
-    // Create and publish scaling events using typed payloads
-    let scale_up = ScaleUpPayload {
-        service: "web-api".to_string(),
-        desired_replicas: 5,
-        reason: "RPS > 1000".to_string(),
-    };
-    let event = scale_up.to_event("Scale up web-api to 5");
-    bus.publish_event(&event).await.unwrap();
-
-    let ready = a3s_event::InstanceReadyPayload {
-        service: "web-api".to_string(),
-        instance_id: "inst-abc".to_string(),
-        endpoint: "10.0.0.5:8080".to_string(),
-    };
-    let event = ready.to_event("Instance inst-abc ready");
-    bus.publish_event(&event).await.unwrap();
-
-    // Verify events are stored
-    let events = bus.list_events(None, 10).await.unwrap();
-    assert_eq!(events.len(), 2);
-    assert!(events.iter().any(|e| e.event_type == "a3s.gateway.scale.up"));
-    assert!(events.iter().any(|e| e.event_type == "a3s.box.instance.ready"));
 }
 
 #[tokio::test]

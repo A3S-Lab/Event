@@ -81,12 +81,8 @@ impl EventProvider for NatsProvider {
         })
     }
 
-    fn build_subject(&self, category: &str, topic: &str) -> String {
-        self.client.config().build_subject(category, topic)
-    }
-
-    fn category_subject(&self, category: &str) -> String {
-        self.client.config().category_subject(category)
+    fn subject_prefix(&self) -> &str {
+        &self.client.config().subject_prefix
     }
 
     fn name(&self) -> &str {

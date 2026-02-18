@@ -5,11 +5,17 @@
 //! but DLQ routing lives above the provider layer.
 
 use crate::error::Result;
+#[cfg(feature = "routing")]
 use crate::sink::EventSink;
-use crate::types::{Event, ReceivedEvent};
+use crate::types::ReceivedEvent;
+use crate::types::now_millis;
 use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+
+// Event is used by SinkDlqHandler (routing) and tests
+#[cfg(any(feature = "routing", test))]
+use crate::types::Event;
 
 /// A failed event with context about why it ended up in the DLQ
 #[derive(Debug, Clone)]
@@ -117,12 +123,6 @@ pub fn should_dead_letter(event: &ReceivedEvent, max_deliver: u64) -> bool {
     max_deliver > 0 && event.num_delivered >= max_deliver
 }
 
-fn now_millis() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
-}
 
 impl DeadLetterEvent {
     /// Create a new dead letter event
@@ -161,12 +161,14 @@ impl DeadLetterEvent {
 /// Wraps a dead-lettered event as a new `Event` with DLQ metadata
 /// and delivers it through the configured sink. Useful for routing
 /// failed events to external systems (logging, alerting, reprocessing).
+#[cfg(feature = "routing")]
 pub struct SinkDlqHandler {
     sink: Arc<dyn EventSink>,
     events: Arc<RwLock<Vec<DeadLetterEvent>>>,
     max_events: usize,
 }
 
+#[cfg(feature = "routing")]
 impl SinkDlqHandler {
     /// Create a new sink-based DLQ handler
     pub fn new(sink: Arc<dyn EventSink>, max_events: usize) -> Self {
@@ -209,6 +211,7 @@ impl SinkDlqHandler {
     }
 }
 
+#[cfg(feature = "routing")]
 #[async_trait]
 impl DlqHandler for SinkDlqHandler {
     async fn handle(&self, event: DeadLetterEvent) -> Result<()> {
@@ -350,6 +353,7 @@ mod tests {
         assert!(dle.first_failure_at.is_none());
     }
 
+    #[cfg(feature = "routing")]
     #[tokio::test]
     async fn test_sink_dlq_handler() {
         use crate::sink::CollectorSink;
@@ -379,6 +383,7 @@ mod tests {
         assert_eq!(events[0].metadata["dlq_delivery_attempts"], "5");
     }
 
+    #[cfg(feature = "routing")]
     #[tokio::test]
     async fn test_sink_dlq_handler_list() {
         use crate::sink::CollectorSink;
@@ -400,6 +405,7 @@ mod tests {
         assert_eq!(list[0].reason, "error 2");
     }
 
+    #[cfg(feature = "routing")]
     #[tokio::test]
     async fn test_sink_dlq_handler_max_capacity() {
         use crate::sink::CollectorSink;

@@ -155,12 +155,8 @@ impl EventProvider for MemoryProvider {
         })
     }
 
-    fn build_subject(&self, category: &str, topic: &str) -> String {
-        format!("{}.{}.{}", self.config.subject_prefix, category, topic)
-    }
-
-    fn category_subject(&self, category: &str) -> String {
-        format!("{}.{}.>", self.config.subject_prefix, category)
+    fn subject_prefix(&self) -> &str {
+        &self.config.subject_prefix
     }
 
     fn name(&self) -> &str {

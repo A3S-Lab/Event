@@ -8,6 +8,7 @@ use crate::types::{Event, PublishOptions, ReceivedEvent, SubscribeOptions};
 use async_trait::async_trait;
 
 pub mod memory;
+#[cfg(feature = "nats")]
 pub mod nats;
 
 /// Core trait for event backends
@@ -49,10 +50,23 @@ pub trait EventProvider: Send + Sync {
     async fn info(&self) -> Result<ProviderInfo>;
 
     /// Build a full subject from category and topic
-    fn build_subject(&self, category: &str, topic: &str) -> String;
+    ///
+    /// Default: `"{prefix}.{category}.{topic}"` using `subject_prefix()`.
+    fn build_subject(&self, category: &str, topic: &str) -> String {
+        format!("{}.{}.{}", self.subject_prefix(), category, topic)
+    }
 
     /// Build a wildcard subject for a category
-    fn category_subject(&self, category: &str) -> String;
+    ///
+    /// Default: `"{prefix}.{category}.>"` using `subject_prefix()`.
+    fn category_subject(&self, category: &str) -> String {
+        format!("{}.{}.>", self.subject_prefix(), category)
+    }
+
+    /// Subject prefix for this provider (e.g., "events")
+    ///
+    /// Used by the default `build_subject()` and `category_subject()` implementations.
+    fn subject_prefix(&self) -> &str;
 
     /// Provider name (e.g., "nats", "memory", "redis")
     fn name(&self) -> &str;
