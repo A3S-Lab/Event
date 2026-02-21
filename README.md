@@ -343,6 +343,10 @@ nats-server -js
 just test-integration
 ```
 
+## Community
+
+Join us on [Discord](https://discord.gg/XVg6Hu6H) for questions, discussions, and updates.
+
 ## License
 
 MIT License — see [LICENSE](LICENSE) for details.
