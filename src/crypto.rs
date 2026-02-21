@@ -164,13 +164,16 @@ impl EventEncryptor for Aes256GcmEncryptor {
         let nonce_bytes = BASE64.decode(&envelope.nonce).map_err(|e| {
             EventError::Config(format!("Invalid nonce encoding: {}", e))
         })?;
-        let nonce = Nonce::from_slice(&nonce_bytes);
+        let nonce_arr: [u8; 12] = nonce_bytes.try_into().map_err(|_| {
+            EventError::Config("Invalid nonce length: expected 12 bytes".to_string())
+        })?;
+        let nonce = Nonce::from(nonce_arr);
 
         let ciphertext = BASE64.decode(&envelope.ciphertext).map_err(|e| {
             EventError::Config(format!("Invalid ciphertext encoding: {}", e))
         })?;
 
-        let plaintext = cipher.decrypt(nonce, ciphertext.as_ref()).map_err(|e| {
+        let plaintext = cipher.decrypt(&nonce, ciphertext.as_ref()).map_err(|e| {
             EventError::Config(format!("Decryption failed: {}", e))
         })?;
 
