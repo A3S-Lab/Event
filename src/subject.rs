@@ -45,13 +45,19 @@ mod tests {
 
     #[test]
     fn test_exact_match() {
-        assert!(subject_matches("events.market.forex", "events.market.forex"));
+        assert!(subject_matches(
+            "events.market.forex",
+            "events.market.forex"
+        ));
     }
 
     #[test]
     fn test_greedy_wildcard() {
         assert!(subject_matches("events.market.forex", "events.market.>"));
-        assert!(subject_matches("events.market.forex.usd", "events.market.>"));
+        assert!(subject_matches(
+            "events.market.forex.usd",
+            "events.market.>"
+        ));
         assert!(subject_matches("events.market.forex", "events.>"));
     }
 

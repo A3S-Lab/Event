@@ -85,9 +85,10 @@ impl Subscription for NatsSubscription {
                     received,
                     move || {
                         Box::pin(async move {
-                            ack_msg.ack().await.map_err(|e| {
-                                EventError::Ack(format!("Failed to ack: {}", e))
-                            })
+                            ack_msg
+                                .ack()
+                                .await
+                                .map_err(|e| EventError::Ack(format!("Failed to ack: {}", e)))
                         })
                     },
                     move || {
@@ -95,9 +96,7 @@ impl Subscription for NatsSubscription {
                             nak_msg
                                 .ack_with(async_nats::jetstream::AckKind::Nak(None))
                                 .await
-                                .map_err(|e| {
-                                    EventError::Ack(format!("Failed to nak: {}", e))
-                                })
+                                .map_err(|e| EventError::Ack(format!("Failed to nak: {}", e)))
                         })
                     },
                 )))

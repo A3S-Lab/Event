@@ -7,8 +7,8 @@
 use crate::error::Result;
 #[cfg(feature = "routing")]
 use crate::sink::EventSink;
-use crate::types::ReceivedEvent;
 use crate::types::now_millis;
+use crate::types::ReceivedEvent;
 use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -123,7 +123,6 @@ pub fn should_dead_letter(event: &ReceivedEvent, max_deliver: u64) -> bool {
     max_deliver > 0 && event.num_delivered >= max_deliver
 }
 
-
 impl DeadLetterEvent {
     /// Create a new dead letter event
     pub fn new(event: ReceivedEvent, reason: impl Into<String>) -> Self {
@@ -192,10 +191,7 @@ impl SinkDlqHandler {
         )
         .with_metadata("dlq_reason", &dle.reason)
         .with_metadata("dlq_original_id", &dle.event.event.id)
-        .with_metadata(
-            "dlq_dead_lettered_at",
-            dle.dead_lettered_at.to_string(),
-        );
+        .with_metadata("dlq_dead_lettered_at", dle.dead_lettered_at.to_string());
 
         if let Some(ref subj) = dle.original_subject {
             event = event.with_metadata("dlq_original_subject", subj);
@@ -338,7 +334,10 @@ mod tests {
             .with_delivery_attempts(5)
             .with_first_failure_at(1700000000000);
 
-        assert_eq!(dle.original_subject.as_deref(), Some("events.payment.process"));
+        assert_eq!(
+            dle.original_subject.as_deref(),
+            Some("events.payment.process")
+        );
         assert_eq!(dle.delivery_attempts, Some(5));
         assert_eq!(dle.first_failure_at, Some(1700000000000));
     }
@@ -392,10 +391,7 @@ mod tests {
         let dlq = SinkDlqHandler::new(collector, 100);
 
         for i in 0..3 {
-            let dle = DeadLetterEvent::new(
-                test_received_event(1),
-                format!("error {}", i),
-            );
+            let dle = DeadLetterEvent::new(test_received_event(1), format!("error {}", i));
             dlq.handle(dle).await.unwrap();
         }
 
@@ -414,10 +410,7 @@ mod tests {
         let dlq = SinkDlqHandler::new(collector, 2);
 
         for i in 0..5 {
-            let dle = DeadLetterEvent::new(
-                test_received_event(1),
-                format!("error {}", i),
-            );
+            let dle = DeadLetterEvent::new(test_received_event(1), format!("error {}", i));
             dlq.handle(dle).await.unwrap();
         }
 

@@ -113,11 +113,7 @@ pub struct Trigger {
 
 impl Trigger {
     /// Create a new trigger
-    pub fn new(
-        name: impl Into<String>,
-        filter: TriggerFilter,
-        sink: Arc<dyn EventSink>,
-    ) -> Self {
+    pub fn new(name: impl Into<String>, filter: TriggerFilter, sink: Arc<dyn EventSink>) -> Self {
         Self {
             name: name.into(),
             filter,
@@ -285,7 +281,11 @@ mod tests {
     fn test_filter_by_type() {
         let filter = TriggerFilter::by_type("a3s.gateway.scale.up");
         assert!(filter.matches(&test_event("a3s.gateway.scale.up", "gw", "events.scale.up")));
-        assert!(!filter.matches(&test_event("a3s.gateway.scale.down", "gw", "events.scale.down")));
+        assert!(!filter.matches(&test_event(
+            "a3s.gateway.scale.down",
+            "gw",
+            "events.scale.down"
+        )));
     }
 
     #[test]
@@ -471,10 +471,18 @@ mod tests {
         let bad_sink = Arc::new(FailingSink::new("bad", "network error"));
 
         broker
-            .add_trigger(Trigger::new("good-trigger", TriggerFilter::default(), good_sink.clone()))
+            .add_trigger(Trigger::new(
+                "good-trigger",
+                TriggerFilter::default(),
+                good_sink.clone(),
+            ))
             .await;
         broker
-            .add_trigger(Trigger::new("bad-trigger", TriggerFilter::default(), bad_sink))
+            .add_trigger(Trigger::new(
+                "bad-trigger",
+                TriggerFilter::default(),
+                bad_sink,
+            ))
             .await;
 
         let event = test_event("any", "any", "events.a");

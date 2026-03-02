@@ -57,8 +57,7 @@ impl EventSink for TopicSink {
 }
 
 /// Type alias for the async handler function used by InProcessSink
-type HandlerFn =
-    dyn Fn(Event) -> BoxFuture<'static, Result<()>> + Send + Sync;
+type HandlerFn = dyn Fn(Event) -> BoxFuture<'static, Result<()>> + Send + Sync;
 
 /// Sink that calls an in-process async handler
 ///

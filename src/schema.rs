@@ -96,9 +96,7 @@ impl Default for MemorySchemaRegistry {
 impl SchemaRegistry for MemorySchemaRegistry {
     fn register(&self, schema: EventSchema) -> Result<()> {
         if schema.event_type.is_empty() {
-            return Err(EventError::Config(
-                "Event type cannot be empty".to_string(),
-            ));
+            return Err(EventError::Config("Event type cannot be empty".to_string()));
         }
         if schema.version == 0 {
             return Err(EventError::Config(
@@ -107,24 +105,27 @@ impl SchemaRegistry for MemorySchemaRegistry {
         }
 
         let key = (schema.event_type.clone(), schema.version);
-        let mut schemas = self.schemas.write().map_err(|e| {
-            EventError::Provider(format!("Schema registry lock poisoned: {}", e))
-        })?;
+        let mut schemas = self
+            .schemas
+            .write()
+            .map_err(|e| EventError::Provider(format!("Schema registry lock poisoned: {}", e)))?;
         schemas.insert(key, schema);
         Ok(())
     }
 
     fn get(&self, event_type: &str, version: u32) -> Result<Option<EventSchema>> {
-        let schemas = self.schemas.read().map_err(|e| {
-            EventError::Provider(format!("Schema registry lock poisoned: {}", e))
-        })?;
+        let schemas = self
+            .schemas
+            .read()
+            .map_err(|e| EventError::Provider(format!("Schema registry lock poisoned: {}", e)))?;
         Ok(schemas.get(&(event_type.to_string(), version)).cloned())
     }
 
     fn latest_version(&self, event_type: &str) -> Result<Option<u32>> {
-        let schemas = self.schemas.read().map_err(|e| {
-            EventError::Provider(format!("Schema registry lock poisoned: {}", e))
-        })?;
+        let schemas = self
+            .schemas
+            .read()
+            .map_err(|e| EventError::Provider(format!("Schema registry lock poisoned: {}", e)))?;
         let max = schemas
             .keys()
             .filter(|(t, _)| t == event_type)
@@ -134,9 +135,10 @@ impl SchemaRegistry for MemorySchemaRegistry {
     }
 
     fn list_types(&self) -> Result<Vec<String>> {
-        let schemas = self.schemas.read().map_err(|e| {
-            EventError::Provider(format!("Schema registry lock poisoned: {}", e))
-        })?;
+        let schemas = self
+            .schemas
+            .read()
+            .map_err(|e| EventError::Provider(format!("Schema registry lock poisoned: {}", e)))?;
         let mut types: Vec<String> = schemas
             .keys()
             .map(|(t, _)| t.clone())
@@ -153,9 +155,10 @@ impl SchemaRegistry for MemorySchemaRegistry {
             return Ok(());
         }
 
-        let schemas = self.schemas.read().map_err(|e| {
-            EventError::Provider(format!("Schema registry lock poisoned: {}", e))
-        })?;
+        let schemas = self
+            .schemas
+            .read()
+            .map_err(|e| EventError::Provider(format!("Schema registry lock poisoned: {}", e)))?;
 
         let key = (event.event_type.clone(), event.version);
         let schema = match schemas.get(&key) {
@@ -178,8 +181,7 @@ impl SchemaRegistry for MemorySchemaRegistry {
             return Err(EventError::SchemaValidation {
                 event_type: event.event_type.clone(),
                 version: event.version,
-                reason: "Payload must be a JSON object when schema has required fields"
-                    .to_string(),
+                reason: "Payload must be a JSON object when schema has required fields".to_string(),
             });
         }
 
@@ -197,9 +199,10 @@ impl SchemaRegistry for MemorySchemaRegistry {
         }
 
         let prev_version = new_version - 1;
-        let schemas = self.schemas.read().map_err(|e| {
-            EventError::Provider(format!("Schema registry lock poisoned: {}", e))
-        })?;
+        let schemas = self
+            .schemas
+            .read()
+            .map_err(|e| EventError::Provider(format!("Schema registry lock poisoned: {}", e)))?;
 
         let prev = match schemas.get(&(event_type.to_string(), prev_version)) {
             Some(s) => s,
@@ -440,7 +443,11 @@ mod tests {
 
         let err = reg.validate(&event).unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("currency"), "Error should mention missing field: {}", msg);
+        assert!(
+            msg.contains("currency"),
+            "Error should mention missing field: {}",
+            msg
+        );
     }
 
     #[test]

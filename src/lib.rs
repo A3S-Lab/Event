@@ -71,9 +71,9 @@ pub use broker::{Broker, RouteResult, Trigger, TriggerFilter};
 pub use cloudevents::CloudEvent;
 #[cfg(feature = "encryption")]
 pub use crypto::{Aes256GcmEncryptor, EncryptedPayload, EventEncryptor};
-pub use dlq::{DeadLetterEvent, DlqHandler, MemoryDlqHandler};
 #[cfg(feature = "routing")]
 pub use dlq::SinkDlqHandler;
+pub use dlq::{DeadLetterEvent, DlqHandler, MemoryDlqHandler};
 pub use error::{EventError, Result};
 pub use metrics::{EventMetrics, MetricsSnapshot};
 pub use provider::{EventProvider, PendingEvent, ProviderInfo, Subscription};

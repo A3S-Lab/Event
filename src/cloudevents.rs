@@ -26,7 +26,6 @@ pub const DEFAULT_DATA_CONTENT_TYPE: &str = "application/json";
 #[serde(rename_all = "camelCase")]
 pub struct CloudEvent {
     // ── Required attributes ──
-
     /// CloudEvents spec version (always "1.0")
     pub specversion: String,
 
@@ -41,7 +40,6 @@ pub struct CloudEvent {
     pub event_type: String,
 
     // ── Optional attributes ──
-
     /// Data content type
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub datacontenttype: Option<String>,
@@ -59,13 +57,11 @@ pub struct CloudEvent {
     pub time: Option<String>,
 
     // ── Data ──
-
     /// Event payload
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data: Option<serde_json::Value>,
 
     // ── Extension attributes ──
-
     /// Extension attributes (includes a3s-prefixed fields)
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub extensions: HashMap<String, serde_json::Value>,
@@ -225,10 +221,7 @@ impl TryFrom<CloudEvent> for Event {
             .and_then(|v| v.as_u64())
             .unwrap_or_else(|| {
                 // Fall back to parsing RFC 3339 time
-                ce.time
-                    .as_deref()
-                    .and_then(rfc3339_to_millis)
-                    .unwrap_or(0)
+                ce.time.as_deref().and_then(rfc3339_to_millis).unwrap_or(0)
             });
 
         // Recover original event_type
@@ -315,10 +308,7 @@ mod tests {
 
         assert_eq!(ce.subject.as_deref(), Some("events.test.a"));
         assert_eq!(ce.data.as_ref().unwrap()["key"], "value");
-        assert_eq!(
-            ce.datacontenttype.as_deref(),
-            Some("application/json")
-        );
+        assert_eq!(ce.datacontenttype.as_deref(), Some("application/json"));
         assert_eq!(ce.time.as_deref(), Some("2024-01-01T00:00:00.000Z"));
         assert_eq!(ce.extensions["custom"], "ext-value");
     }

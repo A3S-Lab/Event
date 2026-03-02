@@ -89,8 +89,8 @@ impl StateStore for FileStateStore {
             ))
         })?;
 
-        let subscriptions: HashMap<String, SubscriptionFilter> =
-            serde_json::from_str(&json).map_err(|e| {
+        let subscriptions: HashMap<String, SubscriptionFilter> = serde_json::from_str(&json)
+            .map_err(|e| {
                 EventError::Config(format!(
                     "Failed to parse state file {}: {}",
                     self.path.display(),
@@ -117,17 +117,19 @@ pub struct MemoryStateStore {
 
 impl StateStore for MemoryStateStore {
     fn save(&self, subscriptions: &HashMap<String, SubscriptionFilter>) -> Result<()> {
-        let mut state = self.state.write().map_err(|e| {
-            EventError::Config(format!("Failed to acquire state lock: {}", e))
-        })?;
+        let mut state = self
+            .state
+            .write()
+            .map_err(|e| EventError::Config(format!("Failed to acquire state lock: {}", e)))?;
         *state = subscriptions.clone();
         Ok(())
     }
 
     fn load(&self) -> Result<HashMap<String, SubscriptionFilter>> {
-        let state = self.state.read().map_err(|e| {
-            EventError::Config(format!("Failed to acquire state lock: {}", e))
-        })?;
+        let state = self
+            .state
+            .read()
+            .map_err(|e| EventError::Config(format!("Failed to acquire state lock: {}", e)))?;
         Ok(state.clone())
     }
 }
@@ -246,10 +248,7 @@ mod tests {
         store.save(&HashMap::new()).unwrap();
         assert!(path.exists());
 
-        std::fs::remove_dir_all(
-            dir.parent().unwrap().parent().unwrap(),
-        )
-        .unwrap();
+        std::fs::remove_dir_all(dir.parent().unwrap().parent().unwrap()).unwrap();
     }
 
     #[test]

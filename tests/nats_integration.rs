@@ -128,9 +128,15 @@ async fn test_nats_durable_subscription() {
     bus.update_subscription(filter).await.unwrap();
 
     // Publish an event
-    bus.publish("market", "forex", "Rate", "test", serde_json::json!({"rate": 7.0}))
-        .await
-        .unwrap();
+    bus.publish(
+        "market",
+        "forex",
+        "Rate",
+        "test",
+        serde_json::json!({"rate": 7.0}),
+    )
+    .await
+    .unwrap();
 
     // Create subscriber and receive
     let mut subs = bus.create_subscriber("test-analyst").await.unwrap();

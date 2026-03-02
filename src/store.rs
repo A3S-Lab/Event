@@ -7,13 +7,13 @@
 use crate::broker::Broker;
 #[cfg(feature = "encryption")]
 use crate::crypto::EventEncryptor;
+use crate::dlq::DlqHandler;
 use crate::error::{EventError, Result};
 use crate::metrics::EventMetrics;
 use crate::provider::{EventProvider, ProviderInfo, Subscription};
 use crate::schema::SchemaRegistry;
 use crate::state::StateStore;
 use crate::types::{Event, EventCounts, PublishOptions, SubscriptionFilter};
-use crate::dlq::DlqHandler;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
@@ -108,10 +108,15 @@ impl EventBus {
     pub fn set_state_store(&mut self, store: Arc<dyn StateStore>) -> Result<()> {
         let loaded = store.load()?;
         if !loaded.is_empty() {
-            tracing::info!(count = loaded.len(), "Restored subscriptions from state store");
+            tracing::info!(
+                count = loaded.len(),
+                "Restored subscriptions from state store"
+            );
             // Use try_write to avoid async — this is called during setup
             let mut subs = self.subscriptions.try_write().map_err(|_| {
-                EventError::Config("Failed to acquire subscription lock during state restore".to_string())
+                EventError::Config(
+                    "Failed to acquire subscription lock during state restore".to_string(),
+                )
             })?;
             *subs = loaded;
         }
@@ -319,20 +324,12 @@ impl EventBus {
     /// Fetch recent events, optionally filtered by category
     ///
     /// If an encryptor is configured, encrypted payloads are decrypted automatically.
-    pub async fn list_events(
-        &self,
-        category: Option<&str>,
-        limit: usize,
-    ) -> Result<Vec<Event>> {
+    pub async fn list_events(&self, category: Option<&str>, limit: usize) -> Result<Vec<Event>> {
         let filter = category.map(|c| self.provider.category_subject(c));
         #[cfg(feature = "encryption")]
-        let mut events = self.provider
-            .history(filter.as_deref(), limit)
-            .await?;
+        let mut events = self.provider.history(filter.as_deref(), limit).await?;
         #[cfg(not(feature = "encryption"))]
-        let events = self.provider
-            .history(filter.as_deref(), limit)
-            .await?;
+        let events = self.provider.history(filter.as_deref(), limit).await?;
         #[cfg(feature = "encryption")]
         {
             let decrypted = self.decrypt_events(&mut events);
@@ -411,19 +408,13 @@ impl EventBus {
                         .subscribe_durable_with_options(&consumer_name, subject, opts)
                         .await?
                 }
-                (Some(opts), false) => {
-                    self.provider
-                        .subscribe_with_options(subject, opts)
-                        .await?
-                }
+                (Some(opts), false) => self.provider.subscribe_with_options(subject, opts).await?,
                 (None, true) => {
                     self.provider
                         .subscribe_durable(&consumer_name, subject)
                         .await?
                 }
-                (None, false) => {
-                    self.provider.subscribe(subject).await?
-                }
+                (None, false) => self.provider.subscribe(subject).await?,
             };
             subscribers.push(sub);
         }
@@ -577,7 +568,13 @@ mod tests {
     async fn test_publish_and_list() {
         let bus = test_bus();
         let event = bus
-            .publish("market", "forex", "Rate change", "reuters", serde_json::json!({"rate": 7.35}))
+            .publish(
+                "market",
+                "forex",
+                "Rate change",
+                "reuters",
+                serde_json::json!({"rate": 7.35}),
+            )
             .await
             .unwrap();
 
@@ -593,7 +590,13 @@ mod tests {
     #[tokio::test]
     async fn test_publish_event_prebuilt() {
         let bus = test_bus();
-        let event = Event::new("events.test.a", "test", "Test", "test", serde_json::json!({}));
+        let event = Event::new(
+            "events.test.a",
+            "test",
+            "Test",
+            "test",
+            serde_json::json!({}),
+        );
         let seq = bus.publish_event(&event).await.unwrap();
         assert!(seq > 0);
 
@@ -604,9 +607,15 @@ mod tests {
     #[tokio::test]
     async fn test_list_events_by_category() {
         let bus = test_bus();
-        bus.publish("market", "forex", "A", "test", serde_json::json!({})).await.unwrap();
-        bus.publish("system", "deploy", "B", "test", serde_json::json!({})).await.unwrap();
-        bus.publish("market", "crypto", "C", "test", serde_json::json!({})).await.unwrap();
+        bus.publish("market", "forex", "A", "test", serde_json::json!({}))
+            .await
+            .unwrap();
+        bus.publish("system", "deploy", "B", "test", serde_json::json!({}))
+            .await
+            .unwrap();
+        bus.publish("market", "crypto", "C", "test", serde_json::json!({}))
+            .await
+            .unwrap();
 
         let market = bus.list_events(Some("market"), 10).await.unwrap();
         assert_eq!(market.len(), 2);
@@ -621,9 +630,15 @@ mod tests {
     #[tokio::test]
     async fn test_counts() {
         let bus = test_bus();
-        bus.publish("market", "forex", "A", "test", serde_json::json!({})).await.unwrap();
-        bus.publish("market", "crypto", "B", "test", serde_json::json!({})).await.unwrap();
-        bus.publish("system", "deploy", "C", "test", serde_json::json!({})).await.unwrap();
+        bus.publish("market", "forex", "A", "test", serde_json::json!({}))
+            .await
+            .unwrap();
+        bus.publish("market", "crypto", "B", "test", serde_json::json!({}))
+            .await
+            .unwrap();
+        bus.publish("system", "deploy", "C", "test", serde_json::json!({}))
+            .await
+            .unwrap();
 
         let counts = bus.counts(100).await.unwrap();
         assert_eq!(counts.total, 3);
@@ -672,7 +687,9 @@ mod tests {
     #[tokio::test]
     async fn test_info() {
         let bus = test_bus();
-        bus.publish("test", "a", "A", "test", serde_json::json!({})).await.unwrap();
+        bus.publish("test", "a", "A", "test", serde_json::json!({}))
+            .await
+            .unwrap();
 
         let info = bus.info().await.unwrap();
         assert_eq!(info.provider, "memory");
@@ -756,7 +773,13 @@ mod tests {
 
         // Manually route an event to DLQ
         let received = crate::types::ReceivedEvent {
-            event: Event::new("events.test.a", "test", "Test", "test", serde_json::json!({})),
+            event: Event::new(
+                "events.test.a",
+                "test",
+                "Test",
+                "test",
+                serde_json::json!({}),
+            ),
             sequence: 1,
             num_delivered: 5,
             stream: "memory".to_string(),
@@ -770,7 +793,13 @@ mod tests {
     #[tokio::test]
     async fn test_publish_with_options() {
         let bus = test_bus();
-        let event = Event::new("events.test.a", "test", "Test", "test", serde_json::json!({}));
+        let event = Event::new(
+            "events.test.a",
+            "test",
+            "Test",
+            "test",
+            serde_json::json!({}),
+        );
         let opts = PublishOptions {
             msg_id: Some("dedup-1".to_string()),
             ..Default::default()
@@ -850,12 +879,20 @@ mod tests {
         bus.set_encryptor(enc.clone());
 
         let event = bus
-            .publish("market", "forex", "Rate", "test", serde_json::json!({"rate": 7.35}))
+            .publish(
+                "market",
+                "forex",
+                "Rate",
+                "test",
+                serde_json::json!({"rate": 7.35}),
+            )
             .await
             .unwrap();
 
         // The stored payload should be encrypted
-        assert!(crate::crypto::EncryptedPayload::is_encrypted(&event.payload));
+        assert!(crate::crypto::EncryptedPayload::is_encrypted(
+            &event.payload
+        ));
 
         // list_events should auto-decrypt
         let events = bus.list_events(Some("market"), 10).await.unwrap();
@@ -870,7 +907,13 @@ mod tests {
         let mut bus = test_bus();
         bus.set_encryptor(enc);
 
-        let event = Event::new("events.test.a", "test", "Test", "test", serde_json::json!({"secret": "data"}));
+        let event = Event::new(
+            "events.test.a",
+            "test",
+            "Test",
+            "test",
+            serde_json::json!({"secret": "data"}),
+        );
         let seq = bus.publish_event(&event).await.unwrap();
         assert!(seq > 0);
 
@@ -887,12 +930,20 @@ mod tests {
     async fn test_no_encryptor_passthrough() {
         let bus = test_bus();
         let event = bus
-            .publish("test", "a", "Test", "test", serde_json::json!({"plain": true}))
+            .publish(
+                "test",
+                "a",
+                "Test",
+                "test",
+                serde_json::json!({"plain": true}),
+            )
             .await
             .unwrap();
 
         // Without encryptor, payload is plain
-        assert!(!crate::crypto::EncryptedPayload::is_encrypted(&event.payload));
+        assert!(!crate::crypto::EncryptedPayload::is_encrypted(
+            &event.payload
+        ));
         assert_eq!(event.payload, serde_json::json!({"plain": true}));
     }
 
@@ -1028,8 +1079,12 @@ mod tests {
     #[tokio::test]
     async fn test_metrics_publish_count() {
         let bus = test_bus();
-        bus.publish("test", "a", "A", "test", serde_json::json!({})).await.unwrap();
-        bus.publish("test", "b", "B", "test", serde_json::json!({})).await.unwrap();
+        bus.publish("test", "a", "A", "test", serde_json::json!({}))
+            .await
+            .unwrap();
+        bus.publish("test", "b", "B", "test", serde_json::json!({}))
+            .await
+            .unwrap();
 
         let s = bus.metrics().snapshot();
         assert_eq!(s.publish_count, 2);
@@ -1069,8 +1124,13 @@ mod tests {
         let bus = EventBus::with_schema_registry(MemoryProvider::default(), registry);
 
         let bad_event = Event::typed(
-            "events.test.a", "test", "strict.type", 1,
-            "Bad", "test", serde_json::json!({}),
+            "events.test.a",
+            "test",
+            "strict.type",
+            1,
+            "Bad",
+            "test",
+            serde_json::json!({}),
         );
         assert!(bus.publish_event(&bad_event).await.is_err());
 
@@ -1086,7 +1146,9 @@ mod tests {
         let mut bus = test_bus();
         bus.set_encryptor(enc);
 
-        bus.publish("test", "a", "A", "test", serde_json::json!({"data": 1})).await.unwrap();
+        bus.publish("test", "a", "A", "test", serde_json::json!({"data": 1}))
+            .await
+            .unwrap();
         bus.list_events(None, 10).await.unwrap();
 
         let s = bus.metrics().snapshot();
@@ -1097,7 +1159,9 @@ mod tests {
     #[tokio::test]
     async fn test_metrics_snapshot_serializable() {
         let bus = test_bus();
-        bus.publish("test", "a", "A", "test", serde_json::json!({})).await.unwrap();
+        bus.publish("test", "a", "A", "test", serde_json::json!({}))
+            .await
+            .unwrap();
 
         let s = bus.metrics().snapshot();
         let json = serde_json::to_string(&s).unwrap();
@@ -1107,7 +1171,9 @@ mod tests {
     #[tokio::test]
     async fn test_metrics_reset() {
         let bus = test_bus();
-        bus.publish("test", "a", "A", "test", serde_json::json!({})).await.unwrap();
+        bus.publish("test", "a", "A", "test", serde_json::json!({}))
+            .await
+            .unwrap();
         assert_eq!(bus.metrics().snapshot().publish_count, 1);
 
         bus.metrics().reset();

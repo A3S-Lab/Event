@@ -51,11 +51,7 @@ impl CronSource {
     /// - `name` — source identifier
     /// - `interval` — time between event emissions
     /// - `factory` — closure that creates each event
-    pub fn new<F>(
-        name: impl Into<String>,
-        interval: std::time::Duration,
-        factory: F,
-    ) -> Self
+    pub fn new<F>(name: impl Into<String>, interval: std::time::Duration, factory: F) -> Self
     where
         F: Fn() -> Event + Send + Sync + 'static,
     {
@@ -180,17 +176,19 @@ mod tests {
         }
 
         // Should have received at least 2 events in 180ms with 50ms interval
-        assert!(events.len() >= 2, "Expected >= 2 events, got {}", events.len());
+        assert!(
+            events.len() >= 2,
+            "Expected >= 2 events, got {}",
+            events.len()
+        );
         assert!(events[0].subject.starts_with("events.cron.tick."));
     }
 
     #[tokio::test]
     async fn test_cron_source_stop() {
-        let source = CronSource::new(
-            "stoppable",
-            std::time::Duration::from_millis(10),
-            || Event::new("events.cron.a", "cron", "A", "src", serde_json::json!({})),
-        );
+        let source = CronSource::new("stoppable", std::time::Duration::from_millis(10), || {
+            Event::new("events.cron.a", "cron", "A", "src", serde_json::json!({}))
+        });
 
         let (tx, _rx) = mpsc::channel(100);
 
@@ -245,11 +243,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_cron_source_name() {
-        let source = CronSource::new(
-            "health-sweep",
-            std::time::Duration::from_secs(30),
-            || Event::new("events.health.sweep", "health", "Sweep", "src", serde_json::json!({})),
-        );
+        let source = CronSource::new("health-sweep", std::time::Duration::from_secs(30), || {
+            Event::new(
+                "events.health.sweep",
+                "health",
+                "Sweep",
+                "src",
+                serde_json::json!({}),
+            )
+        });
         assert_eq!(source.name(), "health-sweep");
     }
 

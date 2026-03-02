@@ -5,7 +5,7 @@
 
 use crate::error::{EventError, Result};
 use aes_gcm::aead::{Aead, KeyInit, OsRng};
-use aes_gcm::{Aes256Gcm, AeadCore, Nonce};
+use aes_gcm::{AeadCore, Aes256Gcm, Nonce};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
@@ -89,9 +89,10 @@ impl Aes256GcmEncryptor {
     /// Old keys remain available for decrypting messages encrypted before rotation.
     pub fn add_key(&self, key_id: impl Into<String>, key: &[u8; 32]) -> Result<()> {
         let cipher = Aes256Gcm::new_from_slice(key).expect("32-byte key");
-        let mut keys = self.keys.write().map_err(|e| {
-            EventError::Config(format!("Failed to acquire key lock: {}", e))
-        })?;
+        let mut keys = self
+            .keys
+            .write()
+            .map_err(|e| EventError::Config(format!("Failed to acquire key lock: {}", e)))?;
         keys.insert(key_id.into(), cipher);
         Ok(())
     }
@@ -100,9 +101,10 @@ impl Aes256GcmEncryptor {
     ///
     /// The new key must already be registered via `add_key()`.
     pub fn rotate_to(&mut self, key_id: &str) -> Result<()> {
-        let keys = self.keys.read().map_err(|e| {
-            EventError::Config(format!("Failed to acquire key lock: {}", e))
-        })?;
+        let keys = self
+            .keys
+            .read()
+            .map_err(|e| EventError::Config(format!("Failed to acquire key lock: {}", e)))?;
         if !keys.contains_key(key_id) {
             return Err(EventError::Config(format!(
                 "Key '{}' not registered, add it first",
@@ -126,17 +128,18 @@ impl EventEncryptor for Aes256GcmEncryptor {
     fn encrypt(&self, payload: &serde_json::Value) -> Result<serde_json::Value> {
         let plaintext = serde_json::to_vec(payload)?;
 
-        let keys = self.keys.read().map_err(|e| {
-            EventError::Config(format!("Failed to acquire key lock: {}", e))
-        })?;
+        let keys = self
+            .keys
+            .read()
+            .map_err(|e| EventError::Config(format!("Failed to acquire key lock: {}", e)))?;
         let cipher = keys.get(&self.active_key_id).ok_or_else(|| {
             EventError::Config(format!("Active key '{}' not found", self.active_key_id))
         })?;
 
         let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
-        let ciphertext = cipher.encrypt(&nonce, plaintext.as_ref()).map_err(|e| {
-            EventError::Config(format!("Encryption failed: {}", e))
-        })?;
+        let ciphertext = cipher
+            .encrypt(&nonce, plaintext.as_ref())
+            .map_err(|e| EventError::Config(format!("Encryption failed: {}", e)))?;
 
         let envelope = EncryptedPayload {
             key_id: self.active_key_id.clone(),
@@ -151,9 +154,10 @@ impl EventEncryptor for Aes256GcmEncryptor {
     fn decrypt(&self, encrypted: &serde_json::Value) -> Result<serde_json::Value> {
         let envelope: EncryptedPayload = serde_json::from_value(encrypted.clone())?;
 
-        let keys = self.keys.read().map_err(|e| {
-            EventError::Config(format!("Failed to acquire key lock: {}", e))
-        })?;
+        let keys = self
+            .keys
+            .read()
+            .map_err(|e| EventError::Config(format!("Failed to acquire key lock: {}", e)))?;
         let cipher = keys.get(&envelope.key_id).ok_or_else(|| {
             EventError::Config(format!(
                 "Decryption key '{}' not registered",
@@ -161,21 +165,21 @@ impl EventEncryptor for Aes256GcmEncryptor {
             ))
         })?;
 
-        let nonce_bytes = BASE64.decode(&envelope.nonce).map_err(|e| {
-            EventError::Config(format!("Invalid nonce encoding: {}", e))
-        })?;
+        let nonce_bytes = BASE64
+            .decode(&envelope.nonce)
+            .map_err(|e| EventError::Config(format!("Invalid nonce encoding: {}", e)))?;
         let nonce_arr: [u8; 12] = nonce_bytes.try_into().map_err(|_| {
             EventError::Config("Invalid nonce length: expected 12 bytes".to_string())
         })?;
         let nonce = Nonce::from(nonce_arr);
 
-        let ciphertext = BASE64.decode(&envelope.ciphertext).map_err(|e| {
-            EventError::Config(format!("Invalid ciphertext encoding: {}", e))
-        })?;
+        let ciphertext = BASE64
+            .decode(&envelope.ciphertext)
+            .map_err(|e| EventError::Config(format!("Invalid ciphertext encoding: {}", e)))?;
 
-        let plaintext = cipher.decrypt(&nonce, ciphertext.as_ref()).map_err(|e| {
-            EventError::Config(format!("Decryption failed: {}", e))
-        })?;
+        let plaintext = cipher
+            .decrypt(&nonce, ciphertext.as_ref())
+            .map_err(|e| EventError::Config(format!("Decryption failed: {}", e)))?;
 
         serde_json::from_slice(&plaintext).map_err(Into::into)
     }

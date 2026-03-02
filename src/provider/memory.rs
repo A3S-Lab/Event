@@ -102,10 +102,7 @@ impl EventProvider for MemoryProvider {
         self.subscribe(filter_subject).await
     }
 
-    async fn subscribe(
-        &self,
-        filter_subject: &str,
-    ) -> Result<Box<dyn Subscription>> {
+    async fn subscribe(&self, filter_subject: &str) -> Result<Box<dyn Subscription>> {
         let receiver = self.sender.subscribe();
         Ok(Box::new(MemorySubscription {
             receiver,
@@ -113,11 +110,7 @@ impl EventProvider for MemoryProvider {
         }))
     }
 
-    async fn history(
-        &self,
-        filter_subject: Option<&str>,
-        limit: usize,
-    ) -> Result<Vec<Event>> {
+    async fn history(&self, filter_subject: Option<&str>, limit: usize) -> Result<Vec<Event>> {
         let events = self.events.read().await;
         let filtered: Vec<Event> = events
             .iter()
@@ -244,8 +237,20 @@ mod tests {
     async fn test_history_with_filter() {
         let provider = MemoryProvider::default();
 
-        let e1 = Event::new("events.market.forex", "market", "A", "test", serde_json::json!({}));
-        let e2 = Event::new("events.system.deploy", "system", "B", "test", serde_json::json!({}));
+        let e1 = Event::new(
+            "events.market.forex",
+            "market",
+            "A",
+            "test",
+            serde_json::json!({}),
+        );
+        let e2 = Event::new(
+            "events.system.deploy",
+            "system",
+            "B",
+            "test",
+            serde_json::json!({}),
+        );
         provider.publish(&e1).await.unwrap();
         provider.publish(&e2).await.unwrap();
 
@@ -306,14 +311,11 @@ mod tests {
             let _ = provider_clone.1.send(event_clone);
         });
 
-        let received = tokio::time::timeout(
-            std::time::Duration::from_millis(100),
-            sub.next(),
-        )
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
+        let received = tokio::time::timeout(std::time::Duration::from_millis(100), sub.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
 
         assert_eq!(received.event.id, event.id);
     }

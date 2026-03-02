@@ -79,11 +79,7 @@ impl NatsClient {
     }
 
     /// Publish an event with options (dedup, expected sequence, timeout)
-    pub async fn publish_with_options(
-        &self,
-        event: &Event,
-        opts: &PublishOptions,
-    ) -> Result<u64> {
+    pub async fn publish_with_options(&self, event: &Event, opts: &PublishOptions) -> Result<u64> {
         let payload = serde_json::to_vec(event)?;
 
         let mut headers = async_nats::HeaderMap::new();
@@ -93,10 +89,7 @@ impl NatsClient {
         }
 
         if let Some(seq) = opts.expected_sequence {
-            headers.insert(
-                "Nats-Expected-Last-Sequence",
-                seq.to_string().as_str(),
-            );
+            headers.insert("Nats-Expected-Last-Sequence", seq.to_string().as_str());
         }
 
         let ack_fut = if headers.is_empty() {
@@ -116,10 +109,12 @@ impl NatsClient {
         let ack = if let Some(timeout_secs) = opts.timeout_secs {
             tokio::time::timeout(Duration::from_secs(timeout_secs), ack_fut)
                 .await
-                .map_err(|_| EventError::Timeout(format!(
-                    "Publish ack timed out after {}s for subject '{}'",
-                    timeout_secs, event.subject
-                )))?
+                .map_err(|_| {
+                    EventError::Timeout(format!(
+                        "Publish ack timed out after {}s for subject '{}'",
+                        timeout_secs, event.subject
+                    ))
+                })?
         } else {
             ack_fut.await
         }
@@ -146,11 +141,7 @@ impl NatsClient {
         filter_subject: &str,
         opts: &SubscribeOptions,
     ) -> Result<NatsSubscription> {
-        let config = build_consumer_config(
-            filter_subject,
-            Some(consumer_name),
-            opts,
-        );
+        let config = build_consumer_config(filter_subject, Some(consumer_name), opts);
 
         let consumer = self
             .stream
@@ -158,17 +149,20 @@ impl NatsClient {
             .await
             .get_or_create_consumer(consumer_name, config)
             .await
-            .map_err(|e| EventError::Consumer(format!(
-                "Failed to create durable consumer '{}': {}",
-                consumer_name, e
-            )))?;
+            .map_err(|e| {
+                EventError::Consumer(format!(
+                    "Failed to create durable consumer '{}': {}",
+                    consumer_name, e
+                ))
+            })?;
 
-        let messages = consumer.messages().await.map_err(|e| {
-            EventError::Subscribe {
+        let messages = consumer
+            .messages()
+            .await
+            .map_err(|e| EventError::Subscribe {
                 subject: filter_subject.to_string(),
                 reason: e.to_string(),
-            }
-        })?;
+            })?;
 
         tracing::info!(
             consumer = consumer_name,
@@ -198,17 +192,17 @@ impl NatsClient {
             .await
             .create_consumer(config)
             .await
-            .map_err(|e| EventError::Consumer(format!(
-                "Failed to create ephemeral consumer: {}",
-                e
-            )))?;
+            .map_err(|e| {
+                EventError::Consumer(format!("Failed to create ephemeral consumer: {}", e))
+            })?;
 
-        let messages = consumer.messages().await.map_err(|e| {
-            EventError::Subscribe {
+        let messages = consumer
+            .messages()
+            .await
+            .map_err(|e| EventError::Subscribe {
                 subject: filter_subject.to_string(),
                 reason: e.to_string(),
-            }
-        })?;
+            })?;
 
         Ok(NatsSubscription::new(
             messages,
@@ -236,17 +230,20 @@ impl NatsClient {
                 },
             )
             .await
-            .map_err(|e| EventError::Consumer(format!(
-                "Failed to create durable consumer '{}': {}",
-                consumer_name, e
-            )))?;
+            .map_err(|e| {
+                EventError::Consumer(format!(
+                    "Failed to create durable consumer '{}': {}",
+                    consumer_name, e
+                ))
+            })?;
 
-        let messages = consumer.messages().await.map_err(|e| {
-            EventError::Subscribe {
+        let messages = consumer
+            .messages()
+            .await
+            .map_err(|e| EventError::Subscribe {
                 subject: filter_subject.to_string(),
                 reason: e.to_string(),
-            }
-        })?;
+            })?;
 
         tracing::info!(
             consumer = consumer_name,
@@ -272,17 +269,17 @@ impl NatsClient {
                 ..Default::default()
             })
             .await
-            .map_err(|e| EventError::Consumer(format!(
-                "Failed to create ephemeral consumer: {}",
-                e
-            )))?;
+            .map_err(|e| {
+                EventError::Consumer(format!("Failed to create ephemeral consumer: {}", e))
+            })?;
 
-        let messages = consumer.messages().await.map_err(|e| {
-            EventError::Subscribe {
+        let messages = consumer
+            .messages()
+            .await
+            .map_err(|e| EventError::Subscribe {
                 subject: filter_subject.to_string(),
                 reason: e.to_string(),
-            }
-        })?;
+            })?;
 
         Ok(NatsSubscription::new(
             messages,
@@ -308,7 +305,9 @@ impl NatsClient {
             .await
             .create_consumer(config)
             .await
-            .map_err(|e| EventError::Consumer(format!("Failed to create history consumer: {}", e)))?;
+            .map_err(|e| {
+                EventError::Consumer(format!("Failed to create history consumer: {}", e))
+            })?;
 
         let mut events = Vec::with_capacity(limit);
         let batch = consumer
@@ -348,10 +347,12 @@ impl NatsClient {
             .await
             .delete_consumer(consumer_name)
             .await
-            .map_err(|e| EventError::Consumer(format!(
-                "Failed to delete consumer '{}': {}",
-                consumer_name, e
-            )))?;
+            .map_err(|e| {
+                EventError::Consumer(format!(
+                    "Failed to delete consumer '{}': {}",
+                    consumer_name, e
+                ))
+            })?;
 
         tracing::info!(consumer = consumer_name, "Consumer deleted");
         Ok(())
@@ -423,9 +424,7 @@ fn build_consumer_config(
                 + time::Duration::nanoseconds(nanos as i64);
             jetstream::consumer::DeliverPolicy::ByStartTime { start_time: time }
         }
-        DeliverPolicy::LastPerSubject => {
-            jetstream::consumer::DeliverPolicy::LastPerSubject
-        }
+        DeliverPolicy::LastPerSubject => jetstream::consumer::DeliverPolicy::LastPerSubject,
     };
 
     let backoff: Vec<Duration> = opts
@@ -490,13 +489,12 @@ async fn ensure_stream(
         ..Default::default()
     };
 
-    let stream = js
-        .get_or_create_stream(stream_config)
-        .await
-        .map_err(|e| EventError::Stream(format!(
+    let stream = js.get_or_create_stream(stream_config).await.map_err(|e| {
+        EventError::Stream(format!(
             "Failed to create/get stream '{}': {}",
             config.stream_name, e
-        )))?;
+        ))
+    })?;
 
     tracing::info!(
         stream = %config.stream_name,

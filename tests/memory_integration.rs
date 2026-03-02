@@ -7,9 +7,9 @@
 
 use a3s_event::{
     Aes256GcmEncryptor, Broker, CloudEvent, CollectorSink, DeadLetterEvent, DlqHandler, Event,
-    EventBus, EventSink, MemoryDlqHandler, MemorySchemaRegistry, MemoryStateStore, EventSchema,
-    SchemaRegistry, SinkDlqHandler, StateStore,
-    SubscriptionFilter, Trigger, TriggerFilter, TopicSink,
+    EventBus, EventSchema, EventSink, MemoryDlqHandler, MemorySchemaRegistry, MemoryStateStore,
+    SchemaRegistry, SinkDlqHandler, StateStore, SubscriptionFilter, TopicSink, Trigger,
+    TriggerFilter,
 };
 use std::sync::Arc;
 
@@ -51,17 +51,27 @@ async fn test_multiple_categories_and_filtering() {
     let bus = test_bus();
 
     bus.publish("market", "forex", "A", "src", serde_json::json!({}))
-        .await.unwrap();
+        .await
+        .unwrap();
     bus.publish("system", "deploy", "B", "src", serde_json::json!({}))
-        .await.unwrap();
+        .await
+        .unwrap();
     bus.publish("market", "crypto", "C", "src", serde_json::json!({}))
-        .await.unwrap();
+        .await
+        .unwrap();
     bus.publish("compliance", "audit", "D", "src", serde_json::json!({}))
-        .await.unwrap();
+        .await
+        .unwrap();
 
     assert_eq!(bus.list_events(Some("market"), 100).await.unwrap().len(), 2);
     assert_eq!(bus.list_events(Some("system"), 100).await.unwrap().len(), 1);
-    assert_eq!(bus.list_events(Some("compliance"), 100).await.unwrap().len(), 1);
+    assert_eq!(
+        bus.list_events(Some("compliance"), 100)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
     assert_eq!(bus.list_events(None, 100).await.unwrap().len(), 4);
 
     let counts = bus.counts(100).await.unwrap();
@@ -92,8 +102,15 @@ async fn test_publish_prebuilt_event() {
 async fn test_history_limit() {
     let bus = test_bus();
     for i in 0..20 {
-        bus.publish("test", "topic", &format!("E{}", i), "src", serde_json::json!({"i": i}))
-            .await.unwrap();
+        bus.publish(
+            "test",
+            "topic",
+            &format!("E{}", i),
+            "src",
+            serde_json::json!({"i": i}),
+        )
+        .await
+        .unwrap();
     }
 
     let limited = bus.list_events(None, 5).await.unwrap();
@@ -115,14 +132,18 @@ async fn test_subscription_crud() {
         subjects: vec!["events.market.>".to_string()],
         durable: true,
         options: None,
-    }).await.unwrap();
+    })
+    .await
+    .unwrap();
 
     bus.update_subscription(SubscriptionFilter {
         subscriber_id: "monitor".to_string(),
         subjects: vec!["events.system.>".to_string()],
         durable: false,
         options: None,
-    }).await.unwrap();
+    })
+    .await
+    .unwrap();
 
     // Read
     let analyst = bus.get_subscription("analyst").await.unwrap();
@@ -135,10 +156,15 @@ async fn test_subscription_crud() {
     // Update (overwrite)
     bus.update_subscription(SubscriptionFilter {
         subscriber_id: "analyst".to_string(),
-        subjects: vec!["events.market.>".to_string(), "events.compliance.>".to_string()],
+        subjects: vec![
+            "events.market.>".to_string(),
+            "events.compliance.>".to_string(),
+        ],
         durable: true,
         options: None,
-    }).await.unwrap();
+    })
+    .await
+    .unwrap();
 
     let updated = bus.get_subscription("analyst").await.unwrap();
     assert_eq!(updated.subjects.len(), 2);
@@ -161,7 +187,9 @@ async fn test_subscribe_and_receive_events() {
         subjects: vec!["events.market.>".to_string()],
         durable: false,
         options: None,
-    }).await.unwrap();
+    })
+    .await
+    .unwrap();
 
     let mut subs = bus.create_subscriber("listener").await.unwrap();
     assert_eq!(subs.len(), 1);
@@ -171,15 +199,18 @@ async fn test_subscribe_and_receive_events() {
     tokio::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         bus_clone
-            .publish("market", "forex", "Rate", "test", serde_json::json!({"rate": 7.35}))
+            .publish(
+                "market",
+                "forex",
+                "Rate",
+                "test",
+                serde_json::json!({"rate": 7.35}),
+            )
             .await
             .unwrap();
     });
 
-    let result = tokio::time::timeout(
-        std::time::Duration::from_secs(2),
-        subs[0].next(),
-    ).await;
+    let result = tokio::time::timeout(std::time::Duration::from_secs(2), subs[0].next()).await;
 
     if let Ok(Ok(Some(received))) = result {
         assert_eq!(received.event.category, "market");
@@ -198,7 +229,9 @@ async fn test_manual_ack_flow() {
         subjects: vec!["events.task.>".to_string()],
         durable: false,
         options: None,
-    }).await.unwrap();
+    })
+    .await
+    .unwrap();
 
     let mut subs = bus.create_subscriber("acker").await.unwrap();
 
@@ -206,15 +239,19 @@ async fn test_manual_ack_flow() {
     tokio::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         bus_clone
-            .publish("task", "completed", "Done", "worker", serde_json::json!({"task": "t-1"}))
+            .publish(
+                "task",
+                "completed",
+                "Done",
+                "worker",
+                serde_json::json!({"task": "t-1"}),
+            )
             .await
             .unwrap();
     });
 
-    let result = tokio::time::timeout(
-        std::time::Duration::from_secs(2),
-        subs[0].next_manual_ack(),
-    ).await;
+    let result =
+        tokio::time::timeout(std::time::Duration::from_secs(2), subs[0].next_manual_ack()).await;
 
     if let Ok(Ok(Some(pending))) = result {
         assert_eq!(pending.received.event.summary, "Done");
@@ -271,8 +308,15 @@ async fn test_encryption_with_key_rotation() {
     bus.set_encryptor(enc);
 
     // Publish with key-v1
-    bus.publish("secret", "data", "V1 event", "src", serde_json::json!({"v": 1}))
-        .await.unwrap();
+    bus.publish(
+        "secret",
+        "data",
+        "V1 event",
+        "src",
+        serde_json::json!({"v": 1}),
+    )
+    .await
+    .unwrap();
 
     // Rotate to key-v2: need a new encryptor with v2 active
     let enc2 = Aes256GcmEncryptor::new("key-v2", &[0x22; 32]);
@@ -281,8 +325,15 @@ async fn test_encryption_with_key_rotation() {
     bus.set_encryptor(enc2);
 
     // Publish with key-v2
-    bus.publish("secret", "data", "V2 event", "src", serde_json::json!({"v": 2}))
-        .await.unwrap();
+    bus.publish(
+        "secret",
+        "data",
+        "V2 event",
+        "src",
+        serde_json::json!({"v": 2}),
+    )
+    .await
+    .unwrap();
 
     // Both should decrypt (both keys registered in enc2)
     let events = bus.list_events(Some("secret"), 10).await.unwrap();
@@ -309,7 +360,9 @@ async fn test_publish_event_prebuilt_does_not_mutate_original() {
 
     // Original event must NOT be mutated
     assert_eq!(original.payload["ssn"], "123-45-6789");
-    assert!(!a3s_event::EncryptedPayload::is_encrypted(&original.payload));
+    assert!(!a3s_event::EncryptedPayload::is_encrypted(
+        &original.payload
+    ));
 }
 
 // ─── Schema Validation End-to-End ────────────────────────────────
@@ -321,15 +374,16 @@ async fn test_schema_validation_rejects_invalid_event() {
         .register(EventSchema {
             event_type: "trade.executed".to_string(),
             version: 1,
-            required_fields: vec!["symbol".to_string(), "quantity".to_string(), "price".to_string()],
+            required_fields: vec![
+                "symbol".to_string(),
+                "quantity".to_string(),
+                "price".to_string(),
+            ],
             description: "Trade execution event".to_string(),
         })
         .unwrap();
 
-    let bus = EventBus::with_schema_registry(
-        a3s_event::MemoryProvider::default(),
-        registry,
-    );
+    let bus = EventBus::with_schema_registry(a3s_event::MemoryProvider::default(), registry);
 
     // Valid typed event
     let valid = Event::typed(
@@ -374,10 +428,7 @@ async fn test_schema_validation_with_encryption() {
         })
         .unwrap();
 
-    let mut bus = EventBus::with_schema_registry(
-        a3s_event::MemoryProvider::default(),
-        registry,
-    );
+    let mut bus = EventBus::with_schema_registry(a3s_event::MemoryProvider::default(), registry);
     bus.set_encryptor(Arc::new(Aes256GcmEncryptor::new("k1", &[0x55; 32])));
 
     // Valid: passes validation, then gets encrypted
@@ -442,7 +493,10 @@ async fn test_dlq_integration() {
     let dead_events = dlq.list(10).await.unwrap();
     assert_eq!(dead_events.len(), 1);
     assert_eq!(dead_events[0].event.event.category, "payment");
-    assert_eq!(dead_events[0].reason, "Max retries exceeded after 5 attempts");
+    assert_eq!(
+        dead_events[0].reason,
+        "Max retries exceeded after 5 attempts"
+    );
 }
 
 // ─── State Persistence ───────────────────────────────────────────
@@ -461,14 +515,18 @@ async fn test_state_persistence_across_bus_instances() {
             subjects: vec!["events.market.>".to_string()],
             durable: true,
             options: None,
-        }).await.unwrap();
+        })
+        .await
+        .unwrap();
 
         bus.update_subscription(SubscriptionFilter {
             subscriber_id: "ops".to_string(),
             subjects: vec!["events.system.>".to_string()],
             durable: false,
             options: None,
-        }).await.unwrap();
+        })
+        .await
+        .unwrap();
     }
 
     // Bus 2: restore from same store
@@ -504,7 +562,9 @@ async fn test_state_persistence_with_file_store() {
             subjects: vec!["events.>".to_string()],
             durable: true,
             options: None,
-        }).await.unwrap();
+        })
+        .await
+        .unwrap();
     }
 
     assert!(path.exists());
@@ -532,7 +592,9 @@ async fn test_remove_subscription_persists() {
         subjects: vec!["events.>".to_string()],
         durable: false,
         options: None,
-    }).await.unwrap();
+    })
+    .await
+    .unwrap();
 
     assert_eq!(store.load().unwrap().len(), 1);
 
@@ -554,22 +616,26 @@ async fn test_metrics_full_lifecycle() {
         })
         .unwrap();
 
-    let mut bus = EventBus::with_schema_registry(
-        a3s_event::MemoryProvider::default(),
-        registry,
-    );
+    let mut bus = EventBus::with_schema_registry(a3s_event::MemoryProvider::default(), registry);
     bus.set_encryptor(Arc::new(Aes256GcmEncryptor::new("k1", &[0x77; 32])));
 
     // Successful publishes
     bus.publish("test", "a", "A", "src", serde_json::json!({"data": 1}))
-        .await.unwrap();
+        .await
+        .unwrap();
     bus.publish("test", "b", "B", "src", serde_json::json!({"data": 2}))
-        .await.unwrap();
+        .await
+        .unwrap();
 
     // Validation error (typed event missing required field)
     let bad = Event::typed(
-        "events.test.c", "test", "strict.event", 1,
-        "Bad", "src", serde_json::json!({}),
+        "events.test.c",
+        "test",
+        "strict.event",
+        1,
+        "Bad",
+        "src",
+        serde_json::json!({}),
     );
     assert!(bus.publish_event(&bad).await.is_err());
 
@@ -579,7 +645,9 @@ async fn test_metrics_full_lifecycle() {
         subjects: vec!["events.>".to_string()],
         durable: false,
         options: None,
-    }).await.unwrap();
+    })
+    .await
+    .unwrap();
     bus.remove_subscription("m").await.unwrap();
 
     // Decrypt via list_events
@@ -606,7 +674,8 @@ async fn test_metrics_full_lifecycle() {
 async fn test_metrics_reset() {
     let bus = test_bus();
     bus.publish("test", "a", "A", "src", serde_json::json!({}))
-        .await.unwrap();
+        .await
+        .unwrap();
 
     assert_eq!(bus.metrics().snapshot().publish_count, 1);
     bus.metrics().reset();
@@ -619,10 +688,18 @@ async fn test_metrics_reset() {
 async fn test_provider_info() {
     let bus = test_bus();
 
-    bus.publish("market", "forex", "A", "src", serde_json::json!({"rate": 7.35}))
-        .await.unwrap();
+    bus.publish(
+        "market",
+        "forex",
+        "A",
+        "src",
+        serde_json::json!({"rate": 7.35}),
+    )
+    .await
+    .unwrap();
     bus.publish("system", "deploy", "B", "src", serde_json::json!({}))
-        .await.unwrap();
+        .await
+        .unwrap();
 
     let info = bus.info().await.unwrap();
     assert_eq!(info.provider, "memory");
@@ -730,10 +807,7 @@ async fn test_full_stack_all_features() {
     let dlq = Arc::new(MemoryDlqHandler::default());
     let enc = Arc::new(Aes256GcmEncryptor::new("prod-key", &[0xDE; 32]));
 
-    let mut bus = EventBus::with_schema_registry(
-        a3s_event::MemoryProvider::default(),
-        registry,
-    );
+    let mut bus = EventBus::with_schema_registry(a3s_event::MemoryProvider::default(), registry);
     bus.set_state_store(store.clone()).unwrap();
     bus.set_dlq_handler(dlq.clone());
     bus.set_encryptor(enc);
@@ -744,7 +818,9 @@ async fn test_full_stack_all_features() {
         subjects: vec!["events.commerce.>".to_string()],
         durable: true,
         options: None,
-    }).await.unwrap();
+    })
+    .await
+    .unwrap();
 
     // 2. Publish valid typed event (validated → encrypted → published)
     let order = Event::typed(
@@ -771,9 +847,15 @@ async fn test_full_stack_all_features() {
     assert!(bus.publish_event(&bad_order).await.is_err());
 
     // 4. Publish untyped event (bypasses validation, still encrypted)
-    bus.publish("commerce", "refund", "Refund issued", "billing",
+    bus.publish(
+        "commerce",
+        "refund",
+        "Refund issued",
+        "billing",
         serde_json::json!({"order_id": "ORD-001", "amount": 99.99}),
-    ).await.unwrap();
+    )
+    .await
+    .unwrap();
 
     // 5. Route a failed event to DLQ
     let failed = a3s_event::ReceivedEvent {
@@ -789,14 +871,17 @@ async fn test_full_stack_all_features() {
         stream: "memory".to_string(),
     };
     dlq.handle(DeadLetterEvent::new(failed, "Processing timeout"))
-        .await.unwrap();
+        .await
+        .unwrap();
 
     // ── Verify everything ──
 
     // History: 2 events, both decrypted
     let events = bus.list_events(Some("commerce"), 100).await.unwrap();
     assert_eq!(events.len(), 2);
-    assert!(events.iter().any(|e| e.payload["order_id"] == "ORD-001" && e.payload["total"] == 99.99));
+    assert!(events
+        .iter()
+        .any(|e| e.payload["order_id"] == "ORD-001" && e.payload["total"] == 99.99));
     assert!(events.iter().any(|e| e.payload["amount"] == 99.99));
 
     // DLQ: 1 dead letter
@@ -911,7 +996,13 @@ async fn test_broker_trigger_routing_via_bus() {
     assert_eq!(result.matched, 1);
 
     // Route an unrelated event — no matches
-    let other = Event::new("events.test.a", "test", "Unrelated", "src", serde_json::json!({}));
+    let other = Event::new(
+        "events.test.a",
+        "test",
+        "Unrelated",
+        "src",
+        serde_json::json!({}),
+    );
     let result = broker.route(&other).await;
     assert_eq!(result.matched, 0);
 
@@ -939,13 +1030,25 @@ async fn test_bus_with_broker_auto_routing() {
     bus.set_broker(broker.clone());
 
     // Publish through bus — should auto-route through broker
-    bus.publish("market", "forex", "Rate", "reuters", serde_json::json!({"rate": 7.35}))
-        .await
-        .unwrap();
+    bus.publish(
+        "market",
+        "forex",
+        "Rate",
+        "reuters",
+        serde_json::json!({"rate": 7.35}),
+    )
+    .await
+    .unwrap();
 
-    bus.publish("system", "deploy", "Deploy", "ci", serde_json::json!({"version": "1.2"}))
-        .await
-        .unwrap();
+    bus.publish(
+        "system",
+        "deploy",
+        "Deploy",
+        "ci",
+        serde_json::json!({"version": "1.2"}),
+    )
+    .await
+    .unwrap();
 
     // Broker should have collected both events
     assert_eq!(collector.count().await, 2);
@@ -989,7 +1092,10 @@ async fn test_sink_dlq_integration() {
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].event_type, "a3s.dlq.dead_letter");
     assert_eq!(events[0].metadata["dlq_reason"], "Timeout after 5 retries");
-    assert_eq!(events[0].metadata["dlq_original_subject"], "events.payment.process");
+    assert_eq!(
+        events[0].metadata["dlq_original_subject"],
+        "events.payment.process"
+    );
     assert_eq!(events[0].metadata["dlq_delivery_attempts"], "5");
     assert_eq!(events[0].metadata["dlq_first_failure_at"], "1700000000000");
 }

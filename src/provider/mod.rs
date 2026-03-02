@@ -4,8 +4,8 @@
 //! `EventProvider` to provide a uniform API for publish, subscribe, and query.
 
 use crate::error::Result;
-use crate::types::{Event, PublishOptions, ReceivedEvent, SubscribeOptions};
 use crate::types::BoxFuture;
+use crate::types::{Event, PublishOptions, ReceivedEvent, SubscribeOptions};
 use async_trait::async_trait;
 
 pub mod memory;
@@ -32,17 +32,10 @@ pub trait EventProvider: Send + Sync {
     ) -> Result<Box<dyn Subscription>>;
 
     /// Create an ephemeral subscription (cleaned up on disconnect)
-    async fn subscribe(
-        &self,
-        filter_subject: &str,
-    ) -> Result<Box<dyn Subscription>>;
+    async fn subscribe(&self, filter_subject: &str) -> Result<Box<dyn Subscription>>;
 
     /// Fetch historical events from the backend
-    async fn history(
-        &self,
-        filter_subject: Option<&str>,
-        limit: usize,
-    ) -> Result<Vec<Event>>;
+    async fn history(&self, filter_subject: Option<&str>, limit: usize) -> Result<Vec<Event>>;
 
     /// Delete a durable subscription by consumer name
     async fn unsubscribe(&self, consumer_name: &str) -> Result<()>;

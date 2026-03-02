@@ -15,17 +15,11 @@ pub enum EventError {
 
     /// Publish failure
     #[error("Failed to publish event to subject '{subject}': {reason}")]
-    Publish {
-        subject: String,
-        reason: String,
-    },
+    Publish { subject: String, reason: String },
 
     /// Subscribe failure
     #[error("Failed to subscribe to subject '{subject}': {reason}")]
-    Subscribe {
-        subject: String,
-        reason: String,
-    },
+    Subscribe { subject: String, reason: String },
 
     /// Serialization/deserialization failure
     #[error("Serialization error: {0}")]
@@ -69,10 +63,7 @@ pub enum EventError {
 
     /// Sink delivery failure
     #[error("Sink delivery failed for '{sink}': {reason}")]
-    SinkDelivery {
-        sink: String,
-        reason: String,
-    },
+    SinkDelivery { sink: String, reason: String },
 
     /// Broker routing failure
     #[error("Broker routing error: {0}")]

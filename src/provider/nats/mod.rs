@@ -47,23 +47,19 @@ impl EventProvider for NatsProvider {
         consumer_name: &str,
         filter_subject: &str,
     ) -> Result<Box<dyn Subscription>> {
-        let sub = self.client.subscribe_durable(consumer_name, filter_subject).await?;
+        let sub = self
+            .client
+            .subscribe_durable(consumer_name, filter_subject)
+            .await?;
         Ok(Box::new(sub))
     }
 
-    async fn subscribe(
-        &self,
-        filter_subject: &str,
-    ) -> Result<Box<dyn Subscription>> {
+    async fn subscribe(&self, filter_subject: &str) -> Result<Box<dyn Subscription>> {
         let sub = self.client.subscribe(filter_subject).await?;
         Ok(Box::new(sub))
     }
 
-    async fn history(
-        &self,
-        filter_subject: Option<&str>,
-        limit: usize,
-    ) -> Result<Vec<Event>> {
+    async fn history(&self, filter_subject: Option<&str>, limit: usize) -> Result<Vec<Event>> {
         self.client.history(filter_subject, limit).await
     }
 

@@ -66,7 +66,8 @@ impl EventMetrics {
     pub fn record_publish(&self, start: Instant) {
         self.publish_count.fetch_add(1, Ordering::Relaxed);
         let latency = start.elapsed().as_micros() as u64;
-        self.publish_latency_us.fetch_add(latency, Ordering::Relaxed);
+        self.publish_latency_us
+            .fetch_add(latency, Ordering::Relaxed);
         self.update_max_latency(latency);
     }
 
