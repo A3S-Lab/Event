@@ -151,9 +151,9 @@ test-nats:
 test-store:
     cargo test --lib -- store::tests
 
-# NATS integration tests (requires running NATS server: nats-server -js)
+# NATS integration tests; fail if JetStream is unavailable
 test-integration:
-    cargo test --test nats_integration
+    A3S_EVENT_REQUIRE_NATS=1 cargo test --test nats_integration -- --test-threads=1
 
 # ============================================================================
 # Benchmarks (requires: cargo install criterion)

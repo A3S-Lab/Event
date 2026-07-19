@@ -17,7 +17,7 @@ pub(crate) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Event {
-    /// Unique event identifier (evt-<uuid>)
+    /// Unique event identifier (`evt-<uuid>`)
     pub id: String,
 
     /// Subject this event was published to

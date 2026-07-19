@@ -289,8 +289,12 @@ impl NatsClient {
 
     /// Fetch historical events from the stream
     pub async fn history(&self, filter_subject: Option<&str>, limit: usize) -> Result<Vec<Event>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+
         let mut config = jetstream::consumer::pull::Config {
-            deliver_policy: jetstream::consumer::DeliverPolicy::Last,
+            deliver_policy: jetstream::consumer::DeliverPolicy::All,
             ack_policy: jetstream::consumer::AckPolicy::None,
             ..Default::default()
         };
@@ -309,10 +313,15 @@ impl NatsClient {
                 EventError::Consumer(format!("Failed to create history consumer: {}", e))
             })?;
 
-        let mut events = Vec::with_capacity(limit);
+        let pending = usize::try_from(consumer.cached_info().num_pending).unwrap_or(usize::MAX);
+        if pending == 0 {
+            return Ok(Vec::new());
+        }
+
+        let mut events = std::collections::VecDeque::with_capacity(pending.min(limit));
         let batch = consumer
             .fetch()
-            .max_messages(limit)
+            .max_messages(pending)
             .expires(Duration::from_secs(self.config.request_timeout_secs))
             .messages()
             .await
@@ -324,10 +333,10 @@ impl NatsClient {
             match msg {
                 Ok(msg) => {
                     if let Ok(event) = serde_json::from_slice::<Event>(&msg.payload) {
-                        events.push(event);
-                    }
-                    if events.len() >= limit {
-                        break;
+                        if events.len() == limit {
+                            events.pop_front();
+                        }
+                        events.push_back(event);
                     }
                 }
                 Err(e) => {
@@ -337,7 +346,7 @@ impl NatsClient {
             }
         }
 
-        Ok(events)
+        Ok(events.into_iter().rev().collect())
     }
 
     /// Delete a durable consumer

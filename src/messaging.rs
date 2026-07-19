@@ -125,9 +125,11 @@ pub trait MessageStream: Send + Sync {
     async fn next_timeout(&mut self, timeout: Duration) -> Result<Option<Message>>;
 }
 
+type SubscriberRegistry = std::sync::Arc<RwLock<Vec<(String, flume::Sender<Message>)>>>;
+
 /// In-memory message broker for single-process testing
 pub struct InMemoryMessaging {
-    subscribers: std::sync::Arc<RwLock<Vec<(String, flume::Sender<Message>)>>>,
+    subscribers: SubscriberRegistry,
 }
 
 impl InMemoryMessaging {
@@ -381,10 +383,14 @@ mod tests {
             "test".to_string(),
             serde_json::json!({}),
         )
-        .to_session("session.123".to_string());
+        .to_session("123".to_string());
         messaging.send(&msg).await.unwrap();
 
-        let received = stream.next().await.unwrap().unwrap();
+        let received = stream
+            .next_timeout(std::time::Duration::from_secs(1))
+            .await
+            .unwrap()
+            .expect("targeted message was not delivered");
         assert_eq!(received.source_id, "session-1");
     }
 
@@ -404,7 +410,7 @@ mod tests {
     async fn test_message_handler_ref_none() {
         let handler = MessageHandlerRef::none();
         let msg = Message::new("s1".to_string(), "test".to_string(), serde_json::json!({}));
-        handler.handle(msg); // Should not panic
+        handler.handle(msg).await; // Should not panic
     }
 
     #[test]

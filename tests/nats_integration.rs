@@ -4,7 +4,9 @@
 //! These tests require a running NATS server with JetStream enabled:
 //!   nats-server -js
 //!
-//! Tests are skipped automatically if NATS is not available.
+//! Tests are skipped automatically if NATS is not available, unless
+//! `A3S_EVENT_REQUIRE_NATS` is set. CI sets this variable so an unavailable
+//! or misconfigured server fails the suite instead of producing a false pass.
 
 use a3s_event::provider::nats::{NatsConfig, NatsProvider, StorageType};
 use a3s_event::{
@@ -12,7 +14,8 @@ use a3s_event::{
     SubscriptionFilter,
 };
 
-/// Try to connect to NATS. Returns None if server is unavailable.
+/// Try to connect to NATS. Returns `None` if the server is unavailable and
+/// fail-closed mode is not enabled.
 async fn try_nats_provider(stream_suffix: &str) -> Option<NatsProvider> {
     let config = NatsConfig {
         url: "nats://127.0.0.1:4222".to_string(),
@@ -26,8 +29,11 @@ async fn try_nats_provider(stream_suffix: &str) -> Option<NatsProvider> {
 
     match NatsProvider::connect(config).await {
         Ok(provider) => Some(provider),
-        Err(_) => {
-            eprintln!("NATS not available, skipping integration test");
+        Err(error) if std::env::var_os("A3S_EVENT_REQUIRE_NATS").is_some() => {
+            panic!("NATS JetStream is required but unavailable: {error}");
+        }
+        Err(error) => {
+            eprintln!("NATS not available, skipping integration test: {error}");
             None
         }
     }
@@ -90,6 +96,37 @@ async fn test_nats_publish_multiple_categories() {
 }
 
 #[tokio::test]
+async fn test_nats_history_returns_latest_events_first() {
+    let bus = nats_bus!("history_order");
+    let mut published_ids = Vec::new();
+
+    for index in 0..5 {
+        let event = bus
+            .publish(
+                "history",
+                &format!("topic.{index}"),
+                &format!("Event {index}"),
+                "test",
+                serde_json::json!({"index": index}),
+            )
+            .await
+            .unwrap();
+        published_ids.push(event.id);
+    }
+
+    let events = bus.list_events(None, 3).await.unwrap();
+    let event_ids: Vec<&str> = events.iter().map(|event| event.id.as_str()).collect();
+    let expected_ids: Vec<&str> = published_ids
+        .iter()
+        .rev()
+        .take(3)
+        .map(String::as_str)
+        .collect();
+
+    assert_eq!(event_ids, expected_ids);
+}
+
+#[tokio::test]
 async fn test_nats_publish_with_dedup() {
     let bus = nats_bus!("dedup");
 
@@ -144,15 +181,16 @@ async fn test_nats_durable_subscription() {
 
     // Try to receive (with timeout to avoid hanging)
     let sub = &mut subs[0];
-    let result = tokio::time::timeout(std::time::Duration::from_secs(2), sub.next()).await;
+    let received = tokio::time::timeout(std::time::Duration::from_secs(5), sub.next())
+        .await
+        .expect("timed out waiting for the durable subscription")
+        .expect("durable subscription returned an error")
+        .expect("durable subscription ended before delivering an event");
 
     // Clean up
     bus.remove_subscription("test-analyst").await.unwrap();
 
-    if let Ok(Ok(Some(received))) = result {
-        assert_eq!(received.event.category, "market");
-    }
-    // If timeout, that's ok — the subscription was created successfully
+    assert_eq!(received.event.category, "market");
 }
 
 #[tokio::test]
@@ -253,14 +291,81 @@ async fn test_nats_manual_ack() {
         .unwrap();
 
     // Receive with manual ack
-    let result =
-        tokio::time::timeout(std::time::Duration::from_secs(2), sub.next_manual_ack()).await;
+    let pending = tokio::time::timeout(std::time::Duration::from_secs(5), sub.next_manual_ack())
+        .await
+        .expect("timed out waiting for a manually acknowledged event")
+        .expect("manual-ack subscription returned an error")
+        .expect("manual-ack subscription ended before delivering an event");
 
-    if let Ok(Ok(Some(pending))) = result {
-        assert_eq!(pending.received.event.summary, "Ack test");
-        pending.ack().await.unwrap();
-    }
+    assert_eq!(pending.received.event.summary, "Ack test");
+    pending.ack().await.unwrap();
 
     // Clean up
     let _ = provider.unsubscribe("ack-test-consumer").await;
+}
+
+#[tokio::test]
+async fn test_nats_unacked_message_is_redelivered() {
+    let suffix = "ack_redelivery";
+    let provider = match try_nats_provider(suffix).await {
+        Some(provider) => provider,
+        None => return,
+    };
+
+    let mut subscription = provider
+        .subscribe_durable_with_options(
+            "ack-redelivery-consumer",
+            &format!("test.{suffix}.>"),
+            &SubscribeOptions {
+                max_deliver: Some(3),
+                ack_wait_secs: Some(1),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    let event = Event::new(
+        format!("test.{suffix}.topic"),
+        "test",
+        "Ack redelivery test",
+        "test",
+        serde_json::json!({}),
+    );
+    provider.publish(&event).await.unwrap();
+
+    let first = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        subscription.next_manual_ack(),
+    )
+    .await
+    .expect("timed out waiting for the initial delivery")
+    .expect("initial delivery returned an error")
+    .expect("subscription ended before the initial delivery");
+
+    assert_eq!(first.received.event.id, event.id);
+    assert_eq!(first.received.num_delivered, 1);
+    drop(first);
+
+    let redelivered = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        subscription.next_manual_ack(),
+    )
+    .await
+    .expect("timed out waiting for the unacknowledged message to be redelivered")
+    .expect("redelivery returned an error")
+    .expect("subscription ended before redelivery");
+
+    assert_eq!(redelivered.received.event.id, event.id);
+    assert!(
+        redelivered.received.num_delivered >= 2,
+        "expected a redelivery count of at least 2, got {}",
+        redelivered.received.num_delivered
+    );
+    redelivered.ack().await.unwrap();
+
+    provider
+        .unsubscribe("ack-redelivery-consumer")
+        .await
+        .unwrap();
 }
