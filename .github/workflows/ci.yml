@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  quality:
+    name: Rust quality
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Test all features
+        run: cargo test --all-targets --all-features
+
+      - name: Test minimal features
+        run: cargo test --all-targets --no-default-features
+
+      - name: Build documentation
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --all-features --no-deps
+
+      - name: Verify package contents
+        run: cargo package
+
+  jetstream:
+    name: NATS JetStream 2.11.8
+    runs-on: ubuntu-24.04
+    env:
+      A3S_EVENT_REQUIRE_NATS: "1"
+      NATS_IMAGE: nats:2.11.8-alpine@sha256:71092f77d707a4a81b12aca5096d6b2d2e07ad16aa57c84066940a17af74f61a
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: jetstream
+
+      - name: Start NATS with JetStream
+        run: |
+          docker run --detach \
+            --name a3s-event-nats \
+            --publish 4222:4222 \
+            --publish 8222:8222 \
+            "$NATS_IMAGE" \
+            --jetstream \
+            --http_port 8222
+
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent \
+              "http://127.0.0.1:8222/healthz?js-enabled-only=true" >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+
+          docker logs a3s-event-nats
+          exit 1
+
+      - name: Run real JetStream integration tests
+        run: cargo test --test nats_integration -- --nocapture --test-threads=1
+
+      - name: Show NATS logs after failure
+        if: failure()
+        run: docker logs a3s-event-nats
+
+      - name: Stop NATS
+        if: always()
+        run: docker rm --force a3s-event-nats

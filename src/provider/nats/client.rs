@@ -6,8 +6,10 @@ use crate::error::{EventError, Result};
 use crate::types::{DeliverPolicy, Event, PublishOptions, SubscribeOptions};
 use async_nats::jetstream;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
+
+const HISTORY_FETCH_BATCH_SIZE: usize = 256;
 
 /// NATS JetStream client
 ///
@@ -289,8 +291,12 @@ impl NatsClient {
 
     /// Fetch historical events from the stream
     pub async fn history(&self, filter_subject: Option<&str>, limit: usize) -> Result<Vec<Event>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+
         let mut config = jetstream::consumer::pull::Config {
-            deliver_policy: jetstream::consumer::DeliverPolicy::Last,
+            deliver_policy: jetstream::consumer::DeliverPolicy::All,
             ack_policy: jetstream::consumer::AckPolicy::None,
             ..Default::default()
         };
@@ -309,35 +315,63 @@ impl NatsClient {
                 EventError::Consumer(format!("Failed to create history consumer: {}", e))
             })?;
 
-        let mut events = Vec::with_capacity(limit);
-        let batch = consumer
-            .fetch()
-            .max_messages(limit)
-            .expires(Duration::from_secs(self.config.request_timeout_secs))
-            .messages()
-            .await
-            .map_err(|e| EventError::JetStream(format!("Failed to fetch history: {}", e)))?;
+        let pending = usize::try_from(consumer.cached_info().num_pending).unwrap_or(usize::MAX);
+        if pending == 0 {
+            return Ok(Vec::new());
+        }
 
         use futures_util::StreamExt;
-        let mut batch = std::pin::pin!(batch);
-        while let Some(msg) = batch.next().await {
-            match msg {
-                Ok(msg) => {
-                    if let Ok(event) = serde_json::from_slice::<Event>(&msg.payload) {
-                        events.push(event);
+        let mut events = std::collections::VecDeque::with_capacity(pending.min(limit));
+        let timeout = Duration::from_secs(self.config.request_timeout_secs);
+        let started_at = Instant::now();
+        let mut remaining = pending;
+
+        'history: while remaining > 0 {
+            let remaining_timeout = timeout.saturating_sub(started_at.elapsed());
+            if remaining_timeout.is_zero() {
+                tracing::warn!(
+                    remaining,
+                    "History fetch reached its request timeout before scanning all pending events"
+                );
+                break;
+            }
+
+            let requested = remaining.min(HISTORY_FETCH_BATCH_SIZE);
+            let batch = consumer
+                .fetch()
+                .max_messages(requested)
+                .expires(remaining_timeout)
+                .messages()
+                .await
+                .map_err(|e| EventError::JetStream(format!("Failed to fetch history: {}", e)))?;
+            let mut batch = std::pin::pin!(batch);
+            let mut received = 0usize;
+
+            while let Some(msg) = batch.next().await {
+                match msg {
+                    Ok(msg) => {
+                        received += 1;
+                        if let Ok(event) = serde_json::from_slice::<Event>(&msg.payload) {
+                            if events.len() == limit {
+                                events.pop_front();
+                            }
+                            events.push_back(event);
+                        }
                     }
-                    if events.len() >= limit {
-                        break;
+                    Err(e) => {
+                        tracing::warn!("Error fetching history message: {}", e);
+                        break 'history;
                     }
                 }
-                Err(e) => {
-                    tracing::warn!("Error fetching history message: {}", e);
-                    break;
-                }
+            }
+
+            remaining = remaining.saturating_sub(received);
+            if received < requested {
+                break;
             }
         }
 
-        Ok(events)
+        Ok(events.into_iter().rev().collect())
     }
 
     /// Delete a durable consumer

@@ -110,11 +110,7 @@ impl EventMetrics {
     pub fn snapshot(&self) -> MetricsSnapshot {
         let publish_count = self.publish_count.load(Ordering::Relaxed);
         let total_latency = self.publish_latency_us.load(Ordering::Relaxed);
-        let avg_latency_us = if publish_count > 0 {
-            total_latency / publish_count
-        } else {
-            0
-        };
+        let avg_latency_us = total_latency.checked_div(publish_count).unwrap_or(0);
 
         MetricsSnapshot {
             publish_count,

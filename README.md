@@ -322,7 +322,7 @@ A3S Event does NOT re-implement capabilities that providers already offer native
 ```bash
 just build              # Build the project
 just test               # Run all tests
-just test-integration   # NATS integration tests (requires nats-server -js)
+just test-integration   # NATS integration tests (fails if JetStream is unavailable)
 just bench              # Performance benchmarks
 just lint               # Run clippy
 just fmt                # Format code
@@ -332,7 +332,7 @@ just doc                # Generate and open docs
 
 ### Test Coverage
 
-176 unit tests + 29 memory integration tests + 9 NATS integration tests + 2 doc tests across 15 modules.
+196 unit tests + 29 memory integration tests + 11 NATS integration tests + 2 doc tests across 15 modules.
 
 ```bash
 # Unit tests (no external dependencies)
@@ -342,6 +342,11 @@ just test
 nats-server -js
 just test-integration
 ```
+
+`just test-integration` sets `A3S_EVENT_REQUIRE_NATS=1`, so a missing or
+misconfigured JetStream server fails instead of silently skipping the suite.
+Every pull request runs the same fail-closed suite against the pinned official
+NATS 2.11.8 image.
 
 ## Community
 

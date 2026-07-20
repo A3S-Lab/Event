@@ -401,7 +401,7 @@ impl EventBus {
 
         let mut subscribers = Vec::new();
         for subject in &filter.subjects {
-            let consumer_name = format!("{}-{}", subscriber_id, subject.replace('.', "-"));
+            let consumer_name = subscription_consumer_name(subscriber_id, subject);
             let sub = match (&filter.options, filter.durable) {
                 (Some(opts), true) => {
                     self.provider
@@ -436,7 +436,7 @@ impl EventBus {
         if let Some(filter) = filter {
             self.metrics.record_unsubscribe();
             for subject in &filter.subjects {
-                let consumer_name = format!("{}-{}", subscriber_id, subject.replace('.', "-"));
+                let consumer_name = subscription_consumer_name(subscriber_id, subject);
                 if let Err(e) = self.provider.unsubscribe(&consumer_name).await {
                     tracing::warn!(
                         consumer = %consumer_name,
@@ -552,6 +552,22 @@ impl EventBus {
     }
 }
 
+fn subscription_consumer_name(subscriber_id: &str, subject: &str) -> String {
+    format!("{subscriber_id}-{subject}")
+        .chars()
+        .map(|character| {
+            if character.is_whitespace()
+                || character.is_control()
+                || matches!(character, '.' | '*' | '>' | '/' | '\\')
+            {
+                '-'
+            } else {
+                character
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -562,6 +578,18 @@ mod tests {
 
     fn test_bus() -> EventBus {
         EventBus::new(MemoryProvider::default())
+    }
+
+    #[test]
+    fn test_subscription_consumer_name_is_provider_safe() {
+        assert_eq!(
+            subscription_consumer_name("tenant 1", "events.market.*.>"),
+            "tenant-1-events-market----"
+        );
+        assert_eq!(
+            subscription_consumer_name("analyst", "events.market.usd"),
+            "analyst-events-market-usd"
+        );
     }
 
     #[tokio::test]
