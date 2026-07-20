@@ -100,7 +100,9 @@ async fn test_nats_history_returns_latest_events_first() {
     let bus = nats_bus!("history_order");
     let mut published_ids = Vec::new();
 
-    for index in 0..5 {
+    // Exceed the client's fixed history-fetch batch size so this also proves
+    // that newest-first limiting remains correct across multiple bounded pulls.
+    for index in 0..260 {
         let event = bus
             .publish(
                 "history",
