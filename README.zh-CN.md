@@ -1,7 +1,7 @@
 # A3S Event
 
 <p align="center">
-  <strong>Language / 语言:</strong>
+  <strong>语言 / Language:</strong>
   <a href="README.md">English</a> ·
   <a href="README.zh-CN.md">中文</a>
 </p>
@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <em>与提供商无关的事件发布、订阅和持久化 — 交换后端而不更改应用程序代码</em>
+  <em>与 provider 无关的事件发布、订阅和持久化 — 切换后端而不更改应用程序代码</em>
 </p>
 
 <p align="center">
@@ -21,8 +21,8 @@
 </p>
 
 <p align="center">
-  <a href="#quick-start">快速入门</a> •
-  <a href="#feature-flags">功能标志</a> •
+  <a href="#quick-start">快速开始</a> •
+  <a href="#feature-flags">Feature Flags</a> •
   <a href="#providers">提供商</a> •
   <a href="#architecture">架构</a> •
   <a href="#api-reference">API 参考</a> •
@@ -34,7 +34,7 @@
 
 ## 概述
 
-**A3S Event** 提供与提供商无关的 API，用于事件订阅、分派和持久化。所有后端均实现 `EventProvider` 特性 — 在 NATS JetStream、内存中或任何自定义提供程序之间交换，而无需更改应用程序代码。
+**A3S Event** 提供与 provider 无关的 API，用于事件订阅、分派和持久化。所有后端均实现 `EventProvider` 特性 — 在 NATS JetStream、内存中或任何自定义provider之间交换，而无需更改应用程序代码。
 
 ```rust
 use a3s_event::{EventBus, Event};
@@ -58,9 +58,9 @@ async fn main() -> a3s_event::Result<()> {
 }
 ```
 
-## 功能标志
+## Feature Flags
 
-所有可选模块都位于功能门后面。最小核心（类型、内存提供程序、EventBus、架构、DLQ、指标）以零可选依赖项进行编译。
+所有可选模块都位于功能门后面。最小核心（类型、内存provider、EventBus、架构、DLQ、指标）以零可选依赖项进行编译。
 
 |特色|默认|描述 |
 |---------|---------|-------------|
@@ -309,14 +309,14 @@ A3S Event 不会重新实现提供商已原生提供的功能。
 |连接弹性 | **提供商** | NATS：async-nats 自动重新连接。 |
 |分区/分片| **提供商** | NATS：基于主题的路由。卡夫卡：分区键。 |
 |传输加密| **提供商** | NATS/Kafka：TLS 配置。 |
-|事件版本控制/架构 | **A3S Event** |与提供商无关的应用程序级别的关注点。 |
+|事件版本控制/架构 | **A3S Event** |与 provider 无关的应用程序级别的关注点。 |
 |有效负载加密 | **A3S Event** |发布前应用程序级加密/解密。 |
 |死信队列 | **A3S Event** |跨提供商的统一 DLQ 抽象。 |
 |状态持久化| **A3S Event** |订阅过滤器在重新启动后的持久性。 |
 |可观察性| **A3S Event** |应用程序级指标和跟踪。 |
 |提供者配置直通 | **A3S Event** |公开提供者本机旋钮（`MaxDeliver`、`BackOff` 等）|
 
-## 发展
+## 开发
 
 ### 先决条件
 
@@ -351,7 +351,7 @@ just test-integration
 
 `just test-integration` 设置 `A3S_EVENT_REQUIRE_NATS=1`，因此缺失或
 配置错误的 JetStream 服务器会失败，而不是默默地跳过套件。
-每个拉取请求都会针对固定的官方运行相同的故障关闭套件
+每个拉取请求都会针对固定的官方运行相同的失败闭合（fail-closed）套件
 NATS 2.11.8 图像。
 
 ## 社区
