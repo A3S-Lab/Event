@@ -61,6 +61,7 @@ All optional modules are behind feature gates. The minimal core (types, memory p
 | Feature | Default | Description |
 |---------|---------|-------------|
 | `nats` | ✅ | NATS JetStream provider (`async-nats`, `futures-util`, `time`) |
+| `iggy` | — | Apache Iggy provider (`iggy`, `bytes`) |
 | `encryption` | ✅ | AES-256-GCM payload encryption (`aes-gcm`, `base64`) |
 | `cloudevents` | ✅ | CloudEvents v1.0 conversion (`chrono`) |
 | `routing` | ✅ | Broker/Trigger event routing + Sink DLQ |
@@ -83,6 +84,7 @@ a3s-event = { version = "0.3", default-features = false, features = ["nats", "en
 |----------|----------|-------------|--------------|
 | `MemoryProvider` | Testing, development, single-process | In-process only | Single process |
 | `NatsProvider` | Production, multi-service | JetStream (file/memory) | Distributed |
+| `IggyProvider` | Production, multi-service, Rust-native broker | Iggy stream (per-topic log) | Distributed |
 
 ### Memory Provider
 
@@ -118,6 +120,32 @@ let provider = NatsProvider::connect(NatsConfig {
     ..Default::default()
 }).await?;
 ```
+
+### Apache Iggy Provider
+
+Requires `iggy` feature. Rust-native message streaming (stream → topic → partition). Subjects map onto Iggy with one rule: the stream holds every topic, and each subject **category** becomes a topic; subscription filters narrow client-side via `subject_matches`. Durable subscriptions are consumer groups with explicitly stored offsets (at-least-once); ordering is total within a category.
+
+```rust
+use a3s_event::provider::iggy::{IggyConfig, IggyProvider};
+
+let provider = IggyProvider::connect(IggyConfig {
+    server_address: "127.0.0.1:5102".to_string(),
+    stream_name: "a3s_events".to_string(),
+    subject_prefix: "events".to_string(),
+    max_age_secs: 604_800, // 7 days
+    ..Default::default()
+}).await?;
+```
+
+Known limitations of the current version (fail-closed, not silently ignored): `expected_sequence` and `DeliverPolicy::LastPerSubject` are rejected; `max_deliver`/`backoff_secs`/`max_ack_pending`/`ack_wait_secs` are accepted and ignored (Iggy's low-level polling has no per-group redelivery controls); topics are single-partition so `IggyPartitioning::Balanced` currently behaves like `Single`.
+
+## Operations
+
+- **Resilience (verified by opt-in chaos tests)**: an Iggy broker restart mid-stream preserves stream/topic/consumer-offset state; consumers reconnecting under the same name resume from their committed offset without replaying acked events. Dead group members are evicted after the server's `consumer_group.rebalancing_timeout` (default 30s). Run the chaos suite locally with `A3S_EVENT_IGGY_RESTART="docker restart <container>" cargo test --test e2e_chaos_resilience`.
+- **Timestamp positioning** (`DeliverPolicy::ByStartTime`) compares against the broker's server-side receive stamps; allow for clock skew between publishers and the broker when choosing cutoffs.
+- **Coverage discipline**: unit coverage is measured with `cargo llvm-cov --lib` (~83% lines; broker provider bodies are exercised by the live-server e2e suites instead). `cargo clippy --all-targets -- -D warnings` runs against both the default and the `nats,iggy` feature sets in CI; the minimal core cross-compiles cleanly for Linux x64/arm64 and Windows.
+- **Baseline performance** (memory provider, crate release profile `opt-level=z` + LTO, criterion, Apple Silicon): publish ~203 µs per 100-event batch (~2.0 µs/event) and ~1.70 ms per 1000-event batch (~1.7 µs/event); `history(limit 100)` ~12.4 µs unfiltered / ~20.8 µs subject-filtered. Broker-backed providers are dominated by network round-trips, not this crate's envelope handling; run `cargo bench --bench publish` for your own baseline.
+- **Migration notes live in [CHANGELOG.md](CHANGELOG.md)** — the 0.4.0 release changes NATS durable consumer naming and NATS `history()` semantics.
 
 ## Architecture
 

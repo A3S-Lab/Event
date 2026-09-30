@@ -52,6 +52,9 @@ jobs:
         run: cargo doc --all-features --no-deps
 
       - name: Verify package contents
+        run: cargo clippy --features iggy --no-default-features --all-targets -- -D warnings
+
+      - name: Package
         run: cargo package
 
   jetstream:
@@ -103,3 +106,78 @@ jobs:
       - name: Stop NATS
         if: always()
         run: docker rm --force a3s-event-nats
+
+  iggy:
+    name: Apache Iggy 0.9.0
+    runs-on: ubuntu-24.04
+    env:
+      A3S_EVENT_REQUIRE_IGGY: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: iggy
+
+      # io_uring needs seccomp=unconfined; single shard + 2s rebalancing
+      # keep the e2e suite fast (server contract documented in
+      # tests/iggy_integration.rs and tests/e2e_chaos_resilience.rs).
+      - name: Start Iggy
+        run: |
+          docker run --detach             --name a3s-event-iggy             --publish 5102:5102             --security-opt seccomp=unconfined             -e RUST_LOG=info             -e IGGY_ROOT_USERNAME=iggy             -e IGGY_ROOT_PASSWORD=iggy             -e IGGY_TCP_ADDRESS=0.0.0.0:5102             -e IGGY_NODE_ADVERTISED_ADDRESS=127.0.0.1             -e IGGY_SHARDING_CPU_ALLOCATION=1             -e IGGY_SHARDING_PIN_CORES=false             -e IGGY_CONSUMER_GROUP_REBALANCING_TIMEOUT=2s             apache/iggy:0.9.0
+
+          for attempt in $(seq 1 30); do
+            if (echo > /dev/tcp/127.0.0.1/5102) 2>/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+
+          docker logs a3s-event-iggy
+          exit 1
+
+      - name: Cross-provider conformance + iggy e2e
+        # --tests (not --all-targets): the criterion bench target does not
+        # accept libtest flags like --test-threads.
+        run: cargo test --features nats,iggy --no-default-features --tests -- --test-threads=1
+
+      # Known upstream flake (apache/iggy#4361): iggy 0.9.0 can panic on
+      # restart/boot replay, killing the server mid-suite. One bounded
+      # retry with a FRESH container keeps CI signal honest without hiding
+      # genuine failures (a real regression fails twice).
+      - name: Retry once on fresh Iggy (upstream #4361 flake)
+        if: failure()
+        run: |
+          docker logs a3s-event-iggy || true
+          docker rm --force a3s-event-iggy
+          docker run --detach \
+            --name a3s-event-iggy \
+            --publish 5102:5102 \
+            --security-opt seccomp=unconfined \
+            -e RUST_LOG=info \
+            -e IGGY_ROOT_USERNAME=iggy \
+            -e IGGY_ROOT_PASSWORD=iggy \
+            -e IGGY_TCP_ADDRESS=0.0.0.0:5102 \
+            -e IGGY_NODE_ADVERTISED_ADDRESS=127.0.0.1 \
+            -e IGGY_SHARDING_CPU_ALLOCATION=1 \
+            -e IGGY_SHARDING_PIN_CORES=false \
+            -e IGGY_CONSUMER_GROUP_REBALANCING_TIMEOUT=2s \
+            apache/iggy:0.9.0
+          for attempt in $(seq 1 30); do
+            if (echo > /dev/tcp/127.0.0.1/5102) 2>/dev/null; then break; fi
+            sleep 1
+          done
+          cargo test --features nats,iggy --no-default-features --tests -- --test-threads=1
+
+      - name: Show Iggy logs after failure
+        if: failure()
+        run: docker logs a3s-event-iggy
+
+      - name: Stop Iggy
+        if: always()
+        run: docker rm --force a3s-event-iggy

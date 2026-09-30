@@ -7,12 +7,16 @@
 use crate::broker::Broker;
 #[cfg(feature = "encryption")]
 use crate::crypto::EventEncryptor;
+#[cfg(feature = "routing")]
+use crate::dlq::DeadLetterEvent;
 use crate::dlq::DlqHandler;
 use crate::error::{EventError, Result};
 use crate::metrics::EventMetrics;
 use crate::provider::{EventProvider, ProviderInfo, Subscription};
 use crate::schema::SchemaRegistry;
 use crate::state::StateStore;
+#[cfg(feature = "routing")]
+use crate::types::ReceivedEvent;
 use crate::types::{Event, EventCounts, PublishOptions, SubscriptionFilter};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -72,6 +76,25 @@ impl EventBus {
         }
     }
 
+    /// Create a new event bus from an already-shared provider
+    ///
+    /// Lets callers hold their own handle to the provider (e.g. conformance
+    /// suites that drive the raw provider alongside the bus).
+    pub fn from_provider(provider: Arc<dyn EventProvider>) -> Self {
+        Self {
+            provider,
+            subscriptions: Arc::new(RwLock::new(HashMap::new())),
+            schema_registry: None,
+            dlq_handler: None,
+            #[cfg(feature = "encryption")]
+            encryptor: None,
+            state_store: None,
+            #[cfg(feature = "routing")]
+            broker: None,
+            metrics: Arc::new(EventMetrics::new()),
+        }
+    }
+
     /// Create a new event bus with schema validation
     pub fn with_schema_registry(
         provider: impl EventProvider + 'static,
@@ -94,6 +117,12 @@ impl EventBus {
     /// Set the dead letter queue handler
     pub fn set_dlq_handler(&mut self, handler: Arc<dyn DlqHandler>) {
         self.dlq_handler = Some(handler);
+    }
+
+    /// Set the schema registry (symmetric with the other `set_*` setters;
+    /// mirrors the schemas passed to [`EventBus::with_schema_registry`])
+    pub fn set_schema_registry(&mut self, registry: Arc<dyn SchemaRegistry>) {
+        self.schema_registry = Some(registry);
     }
 
     /// Set the payload encryptor
@@ -538,6 +567,33 @@ impl EventBus {
                     failed = result.failed,
                     "Broker routing had failures"
                 );
+                // Failed sink deliveries dead-letter when a handler is
+                // configured (the documented DLQ contract).
+                if let Some(ref dlq) = self.dlq_handler {
+                    let now = crate::types::now_millis();
+                    let dead = DeadLetterEvent {
+                        event: ReceivedEvent {
+                            event: event.clone(),
+                            sequence: 0,
+                            num_delivered: result.matched as u64,
+                            stream: self.provider.name().to_string(),
+                        },
+                        reason: format!(
+                            "broker routing: {} of {} sink deliveries failed",
+                            result.failed, result.matched
+                        ),
+                        dead_lettered_at: now,
+                        original_subject: Some(event.subject.clone()),
+                        delivery_attempts: Some(1),
+                        first_failure_at: Some(now),
+                    };
+                    match dlq.handle(dead).await {
+                        Ok(()) => self.metrics.record_dlq(),
+                        Err(e) => {
+                            tracing::warn!(error = %e, "DLQ handler rejected dead letter")
+                        }
+                    }
+                }
             }
         }
     }
@@ -552,6 +608,9 @@ impl EventBus {
     }
 }
 
+/// Consumer name for one (subscriber, subject) pair, safe for every
+/// backend's identifier rules: JetStream rejects '.', '*', '>' in durable
+/// names, and whitespace/control characters are poor citizens everywhere.
 fn subscription_consumer_name(subscriber_id: &str, subject: &str) -> String {
     format!("{subscriber_id}-{subject}")
         .chars()
@@ -570,16 +629,6 @@ fn subscription_consumer_name(subscriber_id: &str, subject: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::dlq::{DeadLetterEvent, MemoryDlqHandler};
-    use crate::provider::memory::MemoryProvider;
-    use crate::schema::{EventSchema, MemorySchemaRegistry};
-    use crate::types::Event;
-
-    fn test_bus() -> EventBus {
-        EventBus::new(MemoryProvider::default())
-    }
-
     #[test]
     fn test_subscription_consumer_name_is_provider_safe() {
         assert_eq!(
@@ -590,6 +639,16 @@ mod tests {
             subscription_consumer_name("analyst", "events.market.usd"),
             "analyst-events-market-usd"
         );
+    }
+
+    use super::*;
+    use crate::dlq::{DeadLetterEvent, MemoryDlqHandler};
+    use crate::provider::memory::MemoryProvider;
+    use crate::schema::{EventSchema, MemorySchemaRegistry};
+    use crate::types::Event;
+
+    fn test_bus() -> EventBus {
+        EventBus::new(MemoryProvider::default())
     }
 
     #[tokio::test]
