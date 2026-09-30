@@ -125,12 +125,13 @@ pub trait MessageStream: Send + Sync {
     async fn next_timeout(&mut self, timeout: Duration) -> Result<Option<Message>>;
 }
 
-type SubscriberRegistry = std::sync::Arc<RwLock<Vec<(String, flume::Sender<Message>)>>>;
-
 /// In-memory message broker for single-process testing
 pub struct InMemoryMessaging {
-    subscribers: SubscriberRegistry,
+    subscribers: std::sync::Arc<RwLock<SubscriberList>>,
 }
+
+/// Registered subscribers: filter pattern plus its delivery channel
+type SubscriberList = Vec<(String, flume::Sender<Message>)>;
 
 impl InMemoryMessaging {
     pub fn new() -> Self {
@@ -151,9 +152,13 @@ impl MessagingPort for InMemoryMessaging {
     async fn send(&self, msg: &Message) -> Result<()> {
         let subscribers = self.subscribers.read().unwrap();
 
-        // Match subscribers by filter pattern
+        // Match subscribers by filter pattern. A targeted message matches
+        // against the target id itself; broadcasts match every filter.
+        // (Prefixing the target with "session." made a targeted send to
+        // "session.123" produce "session.session.123", which no filter
+        // of the documented form can ever match.)
         let pattern = match &msg.target_id {
-            Some(target) => format!("session.{}", target),
+            Some(target) => target.clone(),
             None => "*".to_string(),
         };
 
@@ -218,8 +223,12 @@ fn matches_pattern(pattern: &str, filter: &str) -> bool {
         return false;
     }
 
+    // Wildcards match symmetrically: a `*` token on EITHER side matches any
+    // single token of the other. Callers pass the subscriber filter with
+    // wildcards in either argument order (historical callers do both), and
+    // concrete subjects never contain `*`.
     for (p, f) in pattern_parts.iter().zip(filter_parts.iter()) {
-        if *p != "*" && *p != *f {
+        if *f != "*" && *p != "*" && p != f {
             return false;
         }
     }
@@ -383,14 +392,10 @@ mod tests {
             "test".to_string(),
             serde_json::json!({}),
         )
-        .to_session("123".to_string());
+        .to_session("session.123".to_string());
         messaging.send(&msg).await.unwrap();
 
-        let received = stream
-            .next_timeout(std::time::Duration::from_secs(1))
-            .await
-            .unwrap()
-            .expect("targeted message was not delivered");
+        let received = stream.next().await.unwrap().unwrap();
         assert_eq!(received.source_id, "session-1");
     }
 
@@ -410,7 +415,9 @@ mod tests {
     async fn test_message_handler_ref_none() {
         let handler = MessageHandlerRef::none();
         let msg = Message::new("s1".to_string(), "test".to_string(), serde_json::json!({}));
-        handler.handle(msg).await; // Should not panic
+        // None handler resolves to a ready future; await it to prove it
+        // neither panics nor blocks.
+        handler.handle(msg).await;
     }
 
     #[test]

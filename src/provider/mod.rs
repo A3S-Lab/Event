@@ -12,6 +12,10 @@ pub mod memory;
 #[cfg(feature = "nats")]
 pub mod nats;
 
+/// Apache Iggy provider (feature-gated)
+#[cfg(feature = "iggy")]
+pub mod iggy;
+
 /// Core trait for event backends
 ///
 /// Implementations handle the transport-specific details of event

@@ -19,8 +19,11 @@ use a3s_event::{
 async fn try_nats_provider(stream_suffix: &str) -> Option<NatsProvider> {
     let config = NatsConfig {
         url: "nats://127.0.0.1:4222".to_string(),
-        stream_name: format!("TEST_EVENTS_{}", stream_suffix),
-        subject_prefix: format!("test.{}", stream_suffix),
+        // pid in the FIRST token: fresh subjects per process run can never
+        // overlap a previous run's `test.<suffix>.>` wildcards on a shared
+        // server (JetStream forbids subject overlap between streams).
+        stream_name: format!("TEST_EVENTS_{}_{}", stream_suffix, std::process::id()),
+        subject_prefix: format!("test.{}.{}", std::process::id(), stream_suffix),
         storage: StorageType::Memory,
         max_events: 10_000,
         max_age_secs: 60,
@@ -37,6 +40,11 @@ async fn try_nats_provider(stream_suffix: &str) -> Option<NatsProvider> {
             None
         }
     }
+}
+
+/// Subject prefix for a suffix (mirrors `try_nats_provider`)
+fn nats_prefix(suffix: &str) -> String {
+    format!("test.{}.{}", std::process::id(), suffix)
 }
 
 /// Helper to create an EventBus with NATS, or skip the test
@@ -133,7 +141,7 @@ async fn test_nats_publish_with_dedup() {
     let bus = nats_bus!("dedup");
 
     let event = Event::new(
-        "test.dedup.topic",
+        format!("{}.topic", nats_prefix("dedup")),
         "test",
         "Dedup test",
         "test",
@@ -159,7 +167,7 @@ async fn test_nats_durable_subscription() {
 
     let filter = SubscriptionFilter {
         subscriber_id: "test-analyst".to_string(),
-        subjects: vec!["test.durable_sub.market.>".to_string()],
+        subjects: vec![format!("{}.market.>", nats_prefix("durable_sub"))],
         durable: true,
         options: None,
     };
@@ -201,7 +209,7 @@ async fn test_nats_subscribe_with_options() {
 
     let filter = SubscriptionFilter {
         subscriber_id: "opts-consumer".to_string(),
-        subjects: vec!["test.sub_opts.>".to_string()],
+        subjects: vec![format!("{}.>", nats_prefix("sub_opts"))],
         durable: true,
         options: Some(SubscribeOptions {
             max_deliver: Some(3),
@@ -278,7 +286,7 @@ async fn test_nats_manual_ack() {
 
     // Publish an event
     let event = Event::new(
-        format!("test.{}.topic", suffix),
+        format!("{}.topic", nats_prefix(suffix)),
         "test",
         "Ack test",
         "test",
@@ -288,7 +296,7 @@ async fn test_nats_manual_ack() {
 
     // Subscribe with durable consumer
     let mut sub = provider
-        .subscribe_durable("ack-test-consumer", &format!("test.{}.>", suffix))
+        .subscribe_durable("ack-test-consumer", &format!("{}.>", nats_prefix(suffix)))
         .await
         .unwrap();
 
@@ -317,7 +325,7 @@ async fn test_nats_unacked_message_is_redelivered() {
     let mut subscription = provider
         .subscribe_durable_with_options(
             "ack-redelivery-consumer",
-            &format!("test.{suffix}.>"),
+            &format!("{}.>", nats_prefix(suffix)),
             &SubscribeOptions {
                 max_deliver: Some(3),
                 ack_wait_secs: Some(1),
@@ -328,7 +336,7 @@ async fn test_nats_unacked_message_is_redelivered() {
         .unwrap();
 
     let event = Event::new(
-        format!("test.{suffix}.topic"),
+        format!("{}.topic", nats_prefix(suffix)),
         "test",
         "Ack redelivery test",
         "test",

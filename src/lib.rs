@@ -36,6 +36,7 @@
 //!
 //! - **memory** — In-memory provider for testing and single-process use
 //! - **nats** — NATS JetStream for distributed, persistent event streaming
+//! - **iggy** — Apache Iggy for persistent, distributed event streaming
 //!
 //! ## Architecture
 //!
@@ -92,6 +93,10 @@ pub use types::{
 };
 
 // Re-export providers for convenience
+#[cfg(feature = "iggy")]
+pub use provider::iggy::{
+    IggyClient, IggyConfig, IggyPartitioning, IggyProvider, IggySubscription,
+};
 pub use provider::memory::{MemoryConfig, MemoryProvider};
 #[cfg(feature = "nats")]
 pub use provider::nats::{NatsClient, NatsConfig, NatsProvider, NatsSubscription, StorageType};
