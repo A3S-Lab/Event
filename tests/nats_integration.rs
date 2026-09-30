@@ -30,6 +30,11 @@ async fn try_nats_provider(stream_suffix: &str) -> Option<NatsProvider> {
     match NatsProvider::connect(config).await {
         Ok(provider) => Some(provider),
         Err(e) => {
+            // CI sets A3S_EVENT_REQUIRE_BROKERS=1 so a dead service
+            // container FAILS the build instead of skip-passing.
+            if std::env::var("A3S_EVENT_REQUIRE_BROKERS").is_ok() {
+                panic!("NATS required but unreachable: {e}");
+            }
             eprintln!("NATS not available (connect: {e}), skipping integration test");
             None
         }

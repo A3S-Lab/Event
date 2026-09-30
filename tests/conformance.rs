@@ -774,6 +774,9 @@ fn nats_suite() -> Suite {
                 match NatsProvider::connect(config).await {
                     Ok(p) => Some(Arc::new(p) as Arc<dyn EventProvider>),
                     Err(e) => {
+                        if std::env::var("A3S_EVENT_REQUIRE_BROKERS").is_ok() {
+                            panic!("NATS required but unreachable: {e}");
+                        }
                         eprintln!("NATS unavailable ({e}), skipping conformance");
                         None
                     }
@@ -804,6 +807,9 @@ fn iggy_suite() -> Suite {
                 match IggyProvider::connect(config).await {
                     Ok(p) => Some(Arc::new(p) as Arc<dyn EventProvider>),
                     Err(e) => {
+                        if std::env::var("A3S_EVENT_REQUIRE_BROKERS").is_ok() {
+                            panic!("Iggy required but unreachable: {e}");
+                        }
                         eprintln!("Iggy unavailable ({e}), skipping conformance");
                         None
                     }

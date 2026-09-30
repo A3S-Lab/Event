@@ -66,9 +66,13 @@ jobs:
           -e IGGY_CONSUMER_GROUP_REBALANCING_TIMEOUT=2s
           apache/iggy:0.9.0
       - name: Unit + e2e (default features)
+        env:
+          A3S_EVENT_REQUIRE_BROKERS: ${{ matrix.services && '1' || '' }}
         run: cargo test --all-targets
       - name: Cross-provider conformance + broker e2e
         if: matrix.services
+        env:
+          A3S_EVENT_REQUIRE_BROKERS: "1"
         run: cargo test --features nats,iggy --no-default-features --all-targets
       - name: Chaos (opt-in restarts)
         if: matrix.services
