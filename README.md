@@ -60,8 +60,8 @@ All optional modules are behind feature gates. The minimal core (types, memory p
 
 | Feature | Default | Description |
 |---------|---------|-------------|
-| `nats` | ✅ | NATS JetStream provider (`async-nats`, `futures-util`, `time`) |
-| `iggy` | — | Apache Iggy provider (`iggy`, `bytes`) |
+| `iggy` | ✅ | Apache Iggy provider (`iggy`, `bytes`) — the default backend |
+| `nats` | — | NATS JetStream provider (`async-nats`, `futures-util`, `time`) |
 | `encryption` | ✅ | AES-256-GCM payload encryption (`aes-gcm`, `base64`) |
 | `cloudevents` | ✅ | CloudEvents v1.0 conversion (`chrono`) |
 | `routing` | ✅ | Broker/Trigger event routing + Sink DLQ |
@@ -83,8 +83,8 @@ a3s-event = { version = "0.3", default-features = false, features = ["nats", "en
 | Provider | Use Case | Persistence | Distribution |
 |----------|----------|-------------|--------------|
 | `MemoryProvider` | Testing, development, single-process | In-process only | Single process |
-| `NatsProvider` | Production, multi-service | JetStream (file/memory) | Distributed |
-| `IggyProvider` | Production, multi-service, Rust-native broker | Iggy stream (per-topic log) | Distributed |
+| `IggyProvider` | **Default.** Production, multi-service, Rust-native broker | Iggy stream (per-topic log) | Distributed |
+| `NatsProvider` | Opt-in (`nats` feature). Production, multi-service | JetStream (file/memory) | Distributed |
 
 ### Memory Provider
 

@@ -250,8 +250,12 @@ async fn iggy_personal_access_token_login_flows_end_to_end() {
         .with_server_address("127.0.0.1:5102".to_string())
         .build()
         .unwrap();
-    if let Err(e) = admin.login_user("iggy", "iggy").await {
-        eprintln!("Iggy unavailable ({e}), skipping PAT test");
+    // The raw SDK dial has no built-in bound (the provider wraps its own
+    // connect in a timeout) — bound it here so a dead server skips instead
+    // of hanging the default-feature test run.
+    let login = tokio::time::timeout(Duration::from_secs(5), admin.login_user("iggy", "iggy"));
+    if let Err(_) | Ok(Err(_)) = login.await {
+        eprintln!("Iggy unavailable, skipping PAT test");
         return;
     }
     let pat = match admin

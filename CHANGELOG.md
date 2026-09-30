@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### ⚠️ Operational migrations
 
+- **The default provider is now Iggy.** The default feature set is
+  `iggy, encryption, cloudevents, routing`; NATS becomes opt-in via the
+  `nats` feature. Consumers that relied on the default providing NATS must
+  add `features = ["nats"]`. Note the known upstream Iggy restart issue
+  (apache/iggy#4361) before choosing Iggy for production restart-heavy
+  deployments.
+
 - **NATS durable consumer names are now sanitized.** `EventBus` used to build
   consumer names as `{subscriber}-{subject with '.'→'-'}`; subjects also
   contain `*` and `>`, which JetStream rejects outright (`error 10103`). The
