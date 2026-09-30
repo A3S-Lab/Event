@@ -1,0 +1,102 @@
+//! # a3s-event
+//!
+//! Pluggable event subscription, dispatch, and persistence for the A3S ecosystem.
+//!
+//! ## Overview
+//!
+//! `a3s-event` provides a provider-agnostic API for publishing, subscribing to,
+//! and persisting events. Swap backends (NATS, in-memory, Redis, Kafka, etc.)
+//! without changing application code.
+//!
+//! ## Quick Start
+//!
+//! ```rust
+//! use a3s_event::{EventBus, Event};
+//! use a3s_event::provider::memory::MemoryProvider;
+//!
+//! # async fn example() -> a3s_event::Result<()> {
+//! // Create an event bus with the in-memory provider
+//! let bus = EventBus::new(MemoryProvider::default());
+//!
+//! // Publish an event
+//! let event = bus.publish(
+//!     "market",
+//!     "forex.usd_cny",
+//!     "USD/CNY broke through 7.35",
+//!     "reuters",
+//!     serde_json::json!({"rate": 7.3521}),
+//! ).await?;
+//!
+//! println!("Published: {}", event.id);
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## Providers
+//!
+//! - **memory** — In-memory provider for testing and single-process use
+//! - **nats** — NATS JetStream for distributed, persistent event streaming
+//! - **iggy** — Apache Iggy for persistent, distributed event streaming
+//!
+//! ## Architecture
+//!
+//! - **EventProvider** trait — core abstraction all backends implement
+//! - **EventBus** — high-level API with subscription management
+//! - **Subscription** trait — async event stream from any provider
+//! - **Event** — provider-agnostic message envelope
+
+#[cfg(feature = "routing")]
+pub mod broker;
+#[cfg(feature = "cloudevents")]
+pub mod cloudevents;
+#[cfg(feature = "encryption")]
+pub mod crypto;
+pub mod dlq;
+pub mod error;
+pub mod messaging;
+pub mod metrics;
+pub mod provider;
+pub mod schema;
+#[cfg(feature = "routing")]
+pub mod sink;
+#[cfg(feature = "routing")]
+pub mod source;
+pub mod state;
+pub mod store;
+pub mod subject;
+pub mod types;
+
+// Re-export core types
+#[cfg(feature = "routing")]
+pub use broker::{Broker, RouteResult, Trigger, TriggerFilter};
+#[cfg(feature = "cloudevents")]
+pub use cloudevents::CloudEvent;
+#[cfg(feature = "encryption")]
+pub use crypto::{Aes256GcmEncryptor, EncryptedPayload, EventEncryptor};
+#[cfg(feature = "routing")]
+pub use dlq::SinkDlqHandler;
+pub use dlq::{DeadLetterEvent, DlqHandler, MemoryDlqHandler};
+pub use error::{EventError, Result};
+pub use messaging::{InMemoryMessaging, Message, MessageHandlerRef, MessageStream, MessagingPort};
+pub use metrics::{EventMetrics, MetricsSnapshot};
+pub use provider::{EventProvider, PendingEvent, ProviderInfo, Subscription};
+pub use schema::{Compatibility, EventSchema, MemorySchemaRegistry, SchemaRegistry};
+#[cfg(feature = "routing")]
+pub use sink::{CollectorSink, EventSink, FailingSink, InProcessSink, LogSink, TopicSink};
+#[cfg(feature = "routing")]
+pub use source::{CronSource, EventSource};
+pub use state::{FileStateStore, MemoryStateStore, StateStore};
+pub use store::EventBus;
+pub use types::{
+    DeliverPolicy, Event, EventCounts, PublishOptions, ReceivedEvent, SubscribeOptions,
+    SubscriptionFilter,
+};
+
+// Re-export providers for convenience
+#[cfg(feature = "iggy")]
+pub use provider::iggy::{
+    IggyClient, IggyConfig, IggyPartitioning, IggyProvider, IggySubscription,
+};
+pub use provider::memory::{MemoryConfig, MemoryProvider};
+#[cfg(feature = "nats")]
+pub use provider::nats::{NatsClient, NatsConfig, NatsProvider, NatsSubscription, StorageType};

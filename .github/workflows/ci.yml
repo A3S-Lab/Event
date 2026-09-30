@@ -1,0 +1,87 @@
+# CI matrix for a3s-event.
+#
+# Service containers:
+# - nats: stock `nats -js` (integration tests skip when unreachable)
+# - iggy: needs seccomp=unconfined (io_uring), a single shard, and a short
+#   consumer-group rebalancing timeout so tier-1 scenarios stay fast; see
+#   tests/iggy_integration.rs and tests/e2e_chaos_resilience.rs for the
+#   server contract each flag satisfies.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo clippy --features nats,iggy --no-default-features --all-targets -- -D warnings
+
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        # Minimal core must build everywhere; broker-backed feature sets run
+        # their e2e suites where the service containers are reachable.
+        include:
+          - os: ubuntu-latest
+            features: ""
+            services: true
+          - os: macos-latest
+            features: ""
+            services: false
+          - os: windows-latest
+            features: ""
+            services: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Start NATS
+        if: matrix.services
+        run: docker run -d --name nats -p 4222:4222 nats:2.10-alpine -js -m 8222
+      - name: Start Iggy
+        if: matrix.services
+        run: >
+          docker run -d --name iggy --security-opt seccomp=unconfined
+          -p 5102:5102
+          -e RUST_LOG=info
+          -e IGGY_ROOT_USERNAME=iggy -e IGGY_ROOT_PASSWORD=iggy
+          -e IGGY_TCP_ADDRESS=0.0.0.0:5102
+          -e IGGY_NODE_ADVERTISED_ADDRESS=127.0.0.1
+          -e IGGY_SHARDING_CPU_ALLOCATION=1
+          -e IGGY_SHARDING_PIN_CORES=false
+          -e IGGY_CONSUMER_GROUP_REBALANCING_TIMEOUT=2s
+          apache/iggy:0.9.0
+      - name: Unit + e2e (default features)
+        run: cargo test --all-targets
+      - name: Cross-provider conformance + broker e2e
+        if: matrix.services
+        run: cargo test --features nats,iggy --no-default-features --all-targets
+      - name: Chaos (opt-in restarts)
+        if: matrix.services
+        env:
+          A3S_EVENT_IGGY_RESTART: docker restart iggy
+        run: cargo test --features iggy --no-default-features --test e2e_chaos_resilience
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - run: cargo install cargo-llvm-cov --locked
+      - run: cargo llvm-cov --lib --summary-only
