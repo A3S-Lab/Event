@@ -82,9 +82,11 @@ async fn try_iggy_provider(stream_suffix: &str) -> Option<IggyProvider> {
                     Some(provider)
                 }
                 Err(e) => {
-                    // CI sets A3S_EVENT_REQUIRE_BROKERS=1 so a dead service
+                    // CI sets A3S_EVENT_REQUIRE_IGGY=1 so a dead service
                     // container FAILS the build instead of skip-passing.
-                    if std::env::var("A3S_EVENT_REQUIRE_BROKERS").is_ok() {
+                    if std::env::var_os("A3S_EVENT_REQUIRE_IGGY").is_some()
+                        || std::env::var_os("A3S_EVENT_REQUIRE_BROKERS").is_some()
+                    {
                         panic!("Iggy required but unreachable: {e}");
                     }
                     eprintln!("Iggy not available, skipping integration test");
