@@ -142,7 +142,9 @@ jobs:
           exit 1
 
       - name: Cross-provider conformance + iggy e2e
-        run: cargo test --features nats,iggy --no-default-features --all-targets -- --test-threads=1
+        # --tests (not --all-targets): the criterion bench target does not
+        # accept libtest flags like --test-threads.
+        run: cargo test --features nats,iggy --no-default-features --tests -- --test-threads=1
 
       - name: Show Iggy logs after failure
         if: failure()
