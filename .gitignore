@@ -29,3 +29,7 @@ Thumbs.db
 .claude/settings.local.json
 .claude/sessions/
 .claude/cache/
+
+# Stray artifact from the root monorepo mid-conversion (references crates/box
+# and siblings that do not exist in this standalone crate) — never ship it
+.gitmodules
