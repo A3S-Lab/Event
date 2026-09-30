@@ -26,9 +26,9 @@
 
 #[cfg(feature = "iggy")]
 use a3s_event::provider::iggy::{IggyConfig, IggyPartitioning, IggyProvider};
-use a3s_event::{Event, EventProvider};
 #[cfg(feature = "iggy")]
 use a3s_event::SubscribeOptions;
+use a3s_event::{Event, EventProvider};
 use std::time::Duration;
 
 /// Broker restarts are binary-global side effects: every test in this file
