@@ -16,7 +16,7 @@ name = "a3s_event"
 path = "src/lib.rs"
 
 [features]
-default = ["nats", "encryption", "cloudevents", "routing"]
+default = ["iggy", "encryption", "cloudevents", "routing"]
 nats = ["dep:async-nats", "dep:time", "dep:futures-util"]
 iggy = ["dep:iggy", "dep:bytes"]
 encryption = ["dep:aes-gcm", "dep:base64"]

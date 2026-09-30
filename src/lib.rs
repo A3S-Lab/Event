@@ -35,8 +35,8 @@
 //! ## Providers
 //!
 //! - **memory** — In-memory provider for testing and single-process use
-//! - **nats** — NATS JetStream for distributed, persistent event streaming
-//! - **iggy** — Apache Iggy for persistent, distributed event streaming
+//! - **iggy** — Apache Iggy (DEFAULT) for persistent, distributed event streaming
+//! - **nats** — NATS JetStream, opt-in via the `nats` feature
 //!
 //! ## Architecture
 //!
